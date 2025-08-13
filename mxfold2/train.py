@@ -70,8 +70,18 @@ class Train(Common):
                             loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
                         elif vals['type'][i]=='SHAPE': 
                             loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
+                        elif vals['type'][i]=='MULTI':
+                            seq = seqs[i:i+1]
+                            # 構造ロス（bpseqの辞書→既存ロスが受け取れる形に合わせてください）
+                            struct_loss = torch.sum(loss_fn['BPSEQ'](seq, vals['bpseq'][i:i+1], fname=fnames[i:i+1]))
+                            # shape回帰ロス
+                            tgt = vals['shape_target'][i:i+1]
+                            msk = vals['shape_mask'][i:i+1]
+                            shape_loss = shape_regress_loss_fn(seq, tgt, msk, model)
+                            loss = args.mt_alpha * struct_loss + args.mt_beta * shape_loss                        
                         else:
                             raise(RuntimeError('not implemented'))
+                        # 交互学習のためにタスク形式で重みが異なる
                         loss = loss * loss_weight[vals['type'][i]]
                     
                     loss_total += loss.item()
@@ -132,6 +142,15 @@ class Train(Common):
                             loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
                         elif vals['type'][i]=='SHAPE': 
                             loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
+                        elif vals['type'][i]=='MULTI':
+                            seq = seqs[i:i+1]
+                            # 構造ロス（bpseqの辞書→既存ロスが受け取れる形に合わせてください）
+                            struct_loss = torch.sum(loss_fn['BPSEQ'](seq, vals['bpseq'][i:i+1], fname=fnames[i:i+1]))
+                            # shape回帰ロス
+                            tgt = vals['shape_target'][i:i+1]
+                            msk = vals['shape_mask'][i:i+1]
+                            shape_loss = shape_regress_loss_fn(seq, tgt, msk, model)
+                            loss = args.mt_alpha * struct_loss + args.mt_beta * shape_loss                        
                         else:
                             raise(RuntimeError('not implemented'))
                     loss_total += loss.item()
@@ -304,19 +323,12 @@ class Train(Common):
         else:
             raise(ValueError(f'not implemented: {loss_func}'))
 
-    # def build_multi_loss_function(self, loss_func: str, model, args, shape_model):
-    #     base_loss = self.build_loss_function(loss_func, model, args)
-    #     shape_loss = nn.MSELoss()
-
-    #     def multi_loss(seqs, vals, fnames):
-    #         loss_bp = base_loss(seqs, vals['target'], fname=fnames)
-    #         pred_shape = shape_model(
-    #             seqs, fname=fnames, dataset_id=vals['dataset_id']
-    #         )
-    #         loss_sh = shape_loss(pred_shape, vals['target'])
-    #         return loss_bp + args.shape_loss_weight * loss_sh
-
-    #     return multi_loss
+    def shape_regress_loss_fn(seq, target, mask, model):
+        if not hasattr(model, "predict_shape"):
+            raise RuntimeError("predict_shape(seq) が未実装です。")
+        pred = model.predict_shape(seq)   # (B,N)
+        diff = (pred - target) * mask
+        return (diff.pow(2).sum() / mask.sum().clamp_min(1))
 
     def build_scheduler(self, scheduler: str, optimizer: optim.Optimizer, args: Namespace):
         if scheduler == 'CyclicLR':
@@ -355,6 +367,7 @@ class Train(Common):
         #     shape_dataset = [ ShapeDataset(s, i) for i, s in enumerate(args.shape) ]
         #     train_dataset = ConcatDataset([train_dataset] + shape_dataset)
 
+        # タスクによるデータセット生成の分岐（マルチタスクを生やす）
         task = args.task
         if task == 'Folding':
             # 構造のみ（BPSEQ系データセットだけを使う）
@@ -443,7 +456,7 @@ class Train(Common):
         # else:   #Folding
         #     loss_fn = self.build_loss_function(args.loss_func, model, args) 
 
-        loss_weight = { 'BPSEQ': 1.0, 'SHAPE': args.shape_loss_weight }
+        loss_weight = { 'BPSEQ': 1.0, 'SHAPE': args.shape_loss_weight, 'MULTI': 1.0 }
         scheduler = self.build_scheduler(args.scheduler, optimizer, args)
 
         # Initialize GradScaler for mixed precision training
@@ -604,6 +617,8 @@ class Train(Common):
                             help='Specify a slope used with SHAPE restraints. Default is 2.6.')
         gparser.add_argument('--shape-loss-weight', type=float, default=1.,
                             help='weight for SHAPE loss function (default=1)')
+        parser.add_argument('--mt-alpha', type=float, default=1.0, help='multitask: weight for structure loss')
+        parser.add_argument('--mt-beta',  type=float, default=1.0, help='multitask: weight for SHAPE loss')
 
         cls.add_network_args(subparser)
 

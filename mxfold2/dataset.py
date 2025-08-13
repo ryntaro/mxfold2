@@ -104,3 +104,67 @@ class ShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
         
         seq = ''.join(s)
         return (filename, seq, {'type': 'SHAPE', 'target': torch.tensor(p), 'dataset_id': dataset_id})
+
+class MultiTaskDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
+    """
+    同一配列について BPSEQ(構造) と SHAPE を同時に返すマルチタスク用データセット。
+    - bpseq_list: 1行1パス（BPSEQファイル）
+    - shape_list: 1行1パス（SHAPEファイル）
+    """
+    def __init__(self, bpseq_list: str, shape_list: str, dataset_id: int) -> None:
+        super(Dataset, self).__init__()
+        import os
+        def key_from_path(p: str) -> str:
+            return os.path.basename(p)
+
+        # 1) まず各側のインデックスを構築
+        self.bp = {}   # key -> (seq, bp_dict)
+        self.sh = {}   # key -> (seq, sh_dict)
+
+        with open(bpseq_list) as f:
+            for l in f:
+                p = l.strip().split()[0]
+                key = key_from_path(p)
+                # TODO: 下の _read_bpseq / _read_shape をあなたの既存実装に合わせて作る
+                _, seq, bp_dict = self._read_bpseq(p, dataset_id)
+                self.bp[key] = (seq, bp_dict)
+
+        with open(shape_list) as f:
+            for l in f:
+                p = l.strip().split()[0]
+                key = key_from_path(p)
+                _, seq, sh_dict = self._read_shape(p, dataset_id)
+                self.sh[key] = (seq, sh_dict)
+
+        # 2) 両方揃うキーだけに絞る
+        self.keys = [k for k in self.bp.keys() if k in self.sh]
+        if len(self.keys) == 0:
+            raise ValueError("MultiTaskDataset: BPSEQ と SHAPE に共通キーが見つかりません（ファイル名を揃えてください）。")
+        self.dataset_id = dataset_id
+
+    def __len__(self) -> int:
+        return len(self.keys)
+
+    def __getitem__(self, idx: int) -> tuple[str, str, dict[str, torch.Tensor]]:
+        k = self.keys[idx]
+        seq_bp, bp_dict = self.bp[k]
+        seq_sh, sh_dict = self.sh[k]
+        assert seq_bp == seq_sh, f"seq mismatch for key={k}"
+        return (k, seq_bp, {
+            'type': 'MULTI',
+            # 構造ロスがそのまま読めるよう、bp側の dict を保持
+            'bpseq': bp_dict,
+            # E0 用（predict_shape の教師）
+            'shape_target': sh_dict['target'],
+            'shape_mask':   sh_dict['mask'],
+            'dataset_id': self.dataset_id
+        })
+
+    # ==== ここを既存の読みロジックに合わせて実装してください ====
+    def _read_bpseq(self, filename: str, dataset_id: int):
+        # 例：既存の BpseqDataset.read() 等を再利用
+        raise NotImplementedError
+
+    def _read_shape(self, filename: str, dataset_id: int):
+        # 例：既存の ShapeDataset.read() 等を再利用
+        raise NotImplementedError

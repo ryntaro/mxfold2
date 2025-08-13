@@ -309,6 +309,9 @@ class NeuralNet(nn.Module):
         self.embedding = OneHotEmbedding() if embed_size == 0 else SparseEmbedding(embed_size)
         n_in = self.embedding.n_out
 
+        # embedding の各位置特徴 (n_in=4 or embed_size) から SHAPE を直接回帰するヘッド
+        self.shape_head_e0 = nn.Linear(n_in, 1)
+
         if num_transformer_layers==0:
             self.encoder = CNNLSTMEncoder(n_in,
                 num_filters=num_filters, filter_size=filter_size, pool_size=pool_size, dilation=dilation, num_att=num_att,
@@ -379,6 +382,12 @@ class NeuralNet(nn.Module):
 
             return score_paired, score_unpaired
 
+    # E0ヘッドのみを使って SHAPE を予測（(B, N)）
+    def predict_shape(self, seq: list[str]) -> torch.Tensor:
+        device = next(self.parameters()).device
+        x_embed = self.embedding(['0' + s for s in seq]).to(device)   # (B, C_in, N)
+        return self.shape_head_e0(x_embed.transpose(1, 2)).squeeze(-1)  # (B, N)
+
 
 class NeuralNet1D(nn.Module):
     def __init__(self, embed_size: int = 0,
@@ -398,6 +407,9 @@ class NeuralNet1D(nn.Module):
 
         self.embedding = OneHotEmbedding() if embed_size == 0 else SparseEmbedding(embed_size)
         n_in = self.embedding.n_out
+
+        # 1D 版の shape 回帰のE0 ヘッド
+        self.shape_head_e0 = nn.Linear(n_in, 1)
 
         if num_transformer_layers==0:
             self.encoder = CNNLSTMEncoder(n_in,
@@ -421,3 +433,7 @@ class NeuralNet1D(nn.Module):
             x = self.fc(x)
         return x
 
+    def predict_shape(self, seq: list[str]) -> torch.Tensor:
+        device = next(self.parameters()).device
+        x_embed = self.embedding(['0' + s for s in seq]).to(device)   # (B, C_in, N)
+        return self.shape_head_e0(x_embed.transpose(1, 2)).squeeze(-1)  # (B, N)

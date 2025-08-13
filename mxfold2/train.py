@@ -304,6 +304,19 @@ class Train(Common):
         else:
             raise(ValueError(f'not implemented: {loss_func}'))
 
+    # def build_multi_loss_function(self, loss_func: str, model, args, shape_model):
+    #     base_loss = self.build_loss_function(loss_func, model, args)
+    #     shape_loss = nn.MSELoss()
+
+    #     def multi_loss(seqs, vals, fnames):
+    #         loss_bp = base_loss(seqs, vals['target'], fname=fnames)
+    #         pred_shape = shape_model(
+    #             seqs, fname=fnames, dataset_id=vals['dataset_id']
+    #         )
+    #         loss_sh = shape_loss(pred_shape, vals['target'])
+    #         return loss_bp + args.shape_loss_weight * loss_sh
+
+    #     return multi_loss
 
     def build_scheduler(self, scheduler: str, optimizer: optim.Optimizer, args: Namespace):
         if scheduler == 'CyclicLR':
@@ -389,17 +402,17 @@ class Train(Common):
 
         optimizer = self.build_optimizer(args.optimizer, model, args.lr, args.l2_weight, shape_model=shape_model)
 
-        # loss_fn = {
-        #     'BPSEQ': self.build_loss_function(args.loss_func, model, args), 
-        #     'SHAPE': self.build_shape_loss_function(args.shape_loss_func, model, args, shape_model=shape_model) 
-        # }
+        loss_fn = {
+            'BPSEQ': self.build_loss_function(args.loss_func, model, args), 
+            'SHAPE': self.build_shape_loss_function(args.shape_loss_func, model, args, shape_model=shape_model) 
+        }
         print(args.task)
-        if args.task == 'Assisted_Folding':
-            loss_fn = self.build_shape_loss_function(args.shape_loss_func, model, args, shape_model=shape_model) 
-        elif args.task == 'Multitask':
-            loss_fn = self.build_loss_function(args.loss_func, model, args) 
-        else:   #Folding
-            loss_fn = self.build_loss_function(args.loss_func, model, args) 
+        # if args.task == 'Assisted_Folding':
+        #     loss_fn = self.build_shape_loss_function(args.shape_loss_func, model, args, shape_model=shape_model) 
+        # elif args.task == 'Multitask':
+        #     loss_fn = self.build_loss_function(args.loss_func, model, args) 
+        # else:   #Folding
+        #     loss_fn = self.build_loss_function(args.loss_func, model, args) 
 
         loss_weight = { 'BPSEQ': 1.0, 'SHAPE': args.shape_loss_weight }
         scheduler = self.build_scheduler(args.scheduler, optimizer, args)

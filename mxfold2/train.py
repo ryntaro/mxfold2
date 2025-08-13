@@ -23,7 +23,7 @@ from torch.utils.data import DataLoader, ConcatDataset
 from tqdm import tqdm
 
 from . import interface
-from .dataset import BPseqDataset, FastaDataset, ShapeDataset
+from .dataset import BPseqDataset, FastaDataset, ShapeDataset, MultiTaskDataset
 from .fold.fold import AbstractFold
 from .common import Common
 
@@ -362,7 +362,7 @@ class Train(Common):
         if args.log_dir is not None and 'SummaryWriter' in globals():
             self.writer = SummaryWriter(log_dir=args.log_dir)
         
-        train_dataset = BPseqDataset(args.input)
+        # train_dataset = BPseqDataset(args.input)
         # if args.shape is not None:
         #     shape_dataset = [ ShapeDataset(s, i) for i, s in enumerate(args.shape) ]
         #     train_dataset = ConcatDataset([train_dataset] + shape_dataset)
@@ -371,8 +371,9 @@ class Train(Common):
         task = args.task
         if task == 'Folding':
             # 構造のみ（BPSEQ系データセットだけを使う）
-            pass
+            train_dataset = BPseqDataset(args.input)
         elif task == 'Assisted_Folding':
+            train_dataset = BPseqDataset(args.input)
             # SHAPE拘束つき構造予測（従来の ShapeDataset を追加）
             if not args.shape:
                raise ValueError("Assisted_Folding には --shape リストが必須です。")
@@ -386,7 +387,7 @@ class Train(Common):
             # 複数ファイルのときは dataset_id ごとに MultiTaskDataset を作って連結
             mt_datasets = []
             # args.bpseq_list / args.train など、あなたのBPSEQリスト引数名に合わせて置き換えてください
-            bpseq_lists = args.bpseq if isinstance(args.bpseq, (list,tuple)) else [args.bpseq]
+            bpseq_lists = args.input if isinstance(args.input, (list,tuple)) else [args.input]
             shape_lists = args.shape if isinstance(args.shape, (list,tuple)) else [args.shape]
             if len(bpseq_lists) != len(shape_lists):
                 raise ValueError("Multitask では BPSEQリストと SHAPEリストの本数を一致させてください。")

@@ -37,13 +37,13 @@ class FastaDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
 
 
 class BPseqDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
-    def __init__(self, bpseq_list: str) -> None:
+    def __init__(self, bpseq_list: str, dataset_id: int) -> None:
         super(Dataset, self).__init__()
         self.data = []
         with open(bpseq_list) as f:
             for l in f:
                 l = l.rstrip('\n').split()
-                self.data.append(self.read(l[0]))
+                self.data.append(self.read(l[0], dataset_id))
 
     def __len__(self) -> int:
         return len(self.data)
@@ -51,7 +51,7 @@ class BPseqDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
     def __getitem__(self, idx) -> tuple[str, str, dict[str, torch.Tensor]]:
         return self.data[idx]
 
-    def read(self, filename: str) -> tuple[str, str, dict[str, torch.Tensor]]:
+    def read(self, filename: str, dataset_id: int) -> tuple[str, str, dict[str, torch.Tensor]]:
         with open(filename) as f:
             p: list[int] = [0]
             s = ['']
@@ -68,8 +68,7 @@ class BPseqDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
                     p.append(pair)
         
         seq = ''.join(s)
-        return (filename, seq, {'type': 'BPSEQ', 'target': torch.tensor(p)})
-
+        return (filename, seq, {'type': 'BPSEQ', 'target': torch.tensor(p), 'dataset_id': dataset_id})
 
 class ShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
     def __init__(self, shape_list: str, dataset_id: int) -> None:
@@ -89,6 +88,7 @@ class ShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
     def read(self, filename: str, dataset_id: int) -> tuple[str, str, dict[str, torch.Tensor]]:
         with open(filename) as f:
             p: list[float] = [-999.]
+            m: list[float] = [0.0]# mask
             s = ['']
             for l in f:
                 if not l.startswith('#'):
@@ -101,9 +101,10 @@ class ShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
                         reactivity = -999.
                     s.append(c)
                     p.append(reactivity)
+                    m.append(1 if reactivity != -999 else 0.0)
         
         seq = ''.join(s)
-        return (filename, seq, {'type': 'SHAPE', 'target': torch.tensor(p), 'dataset_id': dataset_id})
+        return (filename, seq, {'type': 'SHAPE', 'target': torch.tensor(p), 'mask':torch.tensor(m), 'dataset_id': dataset_id})
 
 class MultiTaskDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
     """
@@ -125,16 +126,15 @@ class MultiTaskDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
             for l in f:
                 p = l.strip().split()[0]
                 key = key_from_path(p)
-                # TODO: 下の _read_bpseq / _read_shape をあなたの既存実装に合わせて作る
                 _, seq, bp_dict = self._read_bpseq(p, dataset_id)
-                self.bp[key] = (seq, bp_dict)
+                self.bp[key.split('.')[0]] = (seq, bp_dict)
 
         with open(shape_list) as f:
             for l in f:
                 p = l.strip().split()[0]
                 key = key_from_path(p)
                 _, seq, sh_dict = self._read_shape(p, dataset_id)
-                self.sh[key] = (seq, sh_dict)
+                self.sh[key.split('.')[0]] = (seq, sh_dict)
 
         # 2) 両方揃うキーだけに絞る
         self.keys = [k for k in self.bp.keys() if k in self.sh]
@@ -152,19 +152,21 @@ class MultiTaskDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
         assert seq_bp == seq_sh, f"seq mismatch for key={k}"
         return (k, seq_bp, {
             'type': 'MULTI',
-            # 構造ロスがそのまま読めるよう、bp側の dict を保持
             'bpseq': bp_dict,
-            # E0 用（predict_shape の教師）
             'shape_target': sh_dict['target'],
             'shape_mask':   sh_dict['mask'],
             'dataset_id': self.dataset_id
         })
 
-    # ==== ここを既存の読みロジックに合わせて実装してください ====
     def _read_bpseq(self, filename: str, dataset_id: int):
-        # 例：既存の BpseqDataset.read() 等を再利用
-        raise NotImplementedError
+        dummy = BPseqDataset.__new__(BPseqDataset)
+        return BPseqDataset.read(dummy, filename, dataset_id)
 
     def _read_shape(self, filename: str, dataset_id: int):
-        # 例：既存の ShapeDataset.read() 等を再利用
-        raise NotImplementedError
+        dummy = ShapeDataset.__new__(ShapeDataset)
+        _, seq, d = ShapeDataset.read(dummy, filename, dataset_id)
+        return (filename, seq, {
+            'target': d['target'],
+            'mask':   d['mask'],
+            'dataset_id': dataset_id,
+        })

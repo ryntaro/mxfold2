@@ -351,9 +351,38 @@ class Train(Common):
             self.writer = SummaryWriter(log_dir=args.log_dir)
         
         train_dataset = BPseqDataset(args.input)
-        if args.shape is not None:
-            shape_dataset = [ ShapeDataset(s, i) for i, s in enumerate(args.shape) ]
+        # if args.shape is not None:
+        #     shape_dataset = [ ShapeDataset(s, i) for i, s in enumerate(args.shape) ]
+        #     train_dataset = ConcatDataset([train_dataset] + shape_dataset)
+
+        task = args.task
+        if task == 'Folding':
+            # 構造のみ（BPSEQ系データセットだけを使う）
+            pass
+        elif task == 'Assisted_Folding':
+            # SHAPE拘束つき構造予測（従来の ShapeDataset を追加）
+            if not args.shape:
+               raise ValueError("Assisted_Folding には --shape リストが必須です。")
+            # ShapeDataset は従来の 'type':'SHAPE' を返すモードで作成
+            shape_dataset = [ ShapeDataset(s, i, task='SHAPE') for i, s in enumerate(args.shape) ]
             train_dataset = ConcatDataset([train_dataset] + shape_dataset)
+        elif task == 'Multitask':
+            # 同一配列で BPSEQ + SHAPE を同時学習
+            if not args.shape:
+                raise ValueError("Multitask には --shape リストが必須です。")
+            # 複数ファイルのときは dataset_id ごとに MultiTaskDataset を作って連結
+            mt_datasets = []
+            # args.bpseq_list / args.train など、あなたのBPSEQリスト引数名に合わせて置き換えてください
+            bpseq_lists = args.bpseq if isinstance(args.bpseq, (list,tuple)) else [args.bpseq]
+            shape_lists = args.shape if isinstance(args.shape, (list,tuple)) else [args.shape]
+            if len(bpseq_lists) != len(shape_lists):
+                raise ValueError("Multitask では BPSEQリストと SHAPEリストの本数を一致させてください。")
+            for i, (bp, sh) in enumerate(zip(bpseq_lists, shape_lists)):
+                mt_datasets.append(MultiTaskDataset(bpseq_list=bp, shape_list=sh, dataset_id=i))
+            train_dataset = ConcatDataset(mt_datasets)
+        else:
+            raise ValueError(f"unknown task: {task}")
+
 
         # Create generator for reproducible shuffling
         generator = torch.Generator()

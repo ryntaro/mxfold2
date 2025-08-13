@@ -433,6 +433,7 @@ class NeuralNet1D(nn.Module):
             x = self.fc(x)
         return x
 
+    ###てすと    
     def predict_shape(self, seq: list[str]) -> torch.Tensor:
         device = next(self.parameters()).device
         x_embed = self.embedding(['0' + s for s in seq]).to(device)   # (B, C_in, N)

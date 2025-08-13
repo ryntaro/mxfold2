@@ -336,7 +336,7 @@ class Train(Common):
         self.writer = None
         if args.log_dir is not None and 'SummaryWriter' in globals():
             self.writer = SummaryWriter(log_dir=args.log_dir)
-
+        
         train_dataset = BPseqDataset(args.input)
         if args.shape is not None:
             shape_dataset = [ ShapeDataset(s, i) for i, s in enumerate(args.shape) ]
@@ -389,10 +389,18 @@ class Train(Common):
 
         optimizer = self.build_optimizer(args.optimizer, model, args.lr, args.l2_weight, shape_model=shape_model)
 
-        loss_fn = {
-            'BPSEQ': self.build_loss_function(args.loss_func, model, args), 
-            'SHAPE': self.build_shape_loss_function(args.shape_loss_func, model, args, shape_model=shape_model) 
-        }
+        # loss_fn = {
+        #     'BPSEQ': self.build_loss_function(args.loss_func, model, args), 
+        #     'SHAPE': self.build_shape_loss_function(args.shape_loss_func, model, args, shape_model=shape_model) 
+        # }
+        print(args.task)
+        if args.task == 'Assisted_Folding':
+            loss_fn = self.build_shape_loss_function(args.shape_loss_func, model, args, shape_model=shape_model) 
+        elif args.task == 'Multitask':
+            loss_fn = self.build_loss_function(args.loss_func, model, args) 
+        else:   #Folding
+            loss_fn = self.build_loss_function(args.loss_func, model, args) 
+
         loss_weight = { 'BPSEQ': 1.0, 'SHAPE': args.shape_loss_weight }
         scheduler = self.build_scheduler(args.scheduler, optimizer, args)
 
@@ -493,6 +501,8 @@ class Train(Common):
                             default='WARNING', help="set the log level ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
         subparser.add_argument('--use-amp', action='store_true',
                             help='use automatic mixed precision (AMP) for faster training on GPUs')
+        subparser.add_argument('--task', choices=('Folding', 'Assisted_Folding', 'Multitask'),
+                            default='Folding', help="'Folding', 'Assisted_Folding', 'Multitask'")
 
         cls.add_fold_args(subparser)
 

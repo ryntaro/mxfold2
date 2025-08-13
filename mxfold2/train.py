@@ -617,8 +617,8 @@ class Train(Common):
                             help='Specify a slope used with SHAPE restraints. Default is 2.6.')
         gparser.add_argument('--shape-loss-weight', type=float, default=1.,
                             help='weight for SHAPE loss function (default=1)')
-        parser.add_argument('--mt-alpha', type=float, default=1.0, help='multitask: weight for structure loss')
-        parser.add_argument('--mt-beta',  type=float, default=1.0, help='multitask: weight for SHAPE loss')
+        gparser.add_argument('--mt-alpha', type=float, default=1.0, help='multitask: weight for structure loss')
+        gparser.add_argument('--mt-beta',  type=float, default=1.0, help='multitask: weight for SHAPE loss')
 
         cls.add_network_args(subparser)
 

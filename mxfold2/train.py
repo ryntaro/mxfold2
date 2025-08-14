@@ -27,6 +27,9 @@ from .dataset import BPseqDataset, FastaDataset, ShapeDataset, MultiTaskDataset
 from .fold.fold import AbstractFold
 from .common import Common
 
+# shape回帰のために導入
+from .fold.layers import NeuralNet, NeuralNet1D 
+
 try:
     from torch.utils.tensorboard.writer import SummaryWriter
 except ImportError:
@@ -72,12 +75,13 @@ class Train(Common):
                             loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
                         elif vals['type'][i]=='MULTI':
                             seq = seqs[i:i+1]
-                            # 構造ロス（bpseqの辞書→既存ロスが受け取れる形に合わせてください）
+                            # 構造ロス
                             struct_loss = torch.sum(loss_fn['BPSEQ'](seq, vals['bpseq'][i:i+1], fname=fnames[i:i+1]))
-                            # shape回帰ロス
+                            # shape回帰ロス 関数化したかったがloss_fnにくわえるのが難しそうなので直で書くことにした
                             tgt = vals['shape_target'][i:i+1]
                             msk = vals['shape_mask'][i:i+1]
-                            shape_loss = shape_regress_loss_fn(seq, tgt, msk, model)
+                            shape_loss = loss_fn['SHAPE_regress'](seq, tgt, msk)
+
                             loss = args.mt_alpha * struct_loss + args.mt_beta * shape_loss                        
                         else:
                             raise(RuntimeError('not implemented'))
@@ -144,12 +148,13 @@ class Train(Common):
                             loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
                         elif vals['type'][i]=='MULTI':
                             seq = seqs[i:i+1]
-                            # 構造ロス（bpseqの辞書→既存ロスが受け取れる形に合わせてください）
+                            # 構造ロス
                             struct_loss = torch.sum(loss_fn['BPSEQ'](seq, vals['bpseq'][i:i+1], fname=fnames[i:i+1]))
                             # shape回帰ロス
                             tgt = vals['shape_target'][i:i+1]
                             msk = vals['shape_mask'][i:i+1]
-                            shape_loss = shape_regress_loss_fn(seq, tgt, msk, model)
+                            shape_loss = loss_fn['SHAPE_regress'](seq, tgt, msk)
+
                             loss = args.mt_alpha * struct_loss + args.mt_beta * shape_loss                        
                         else:
                             raise(RuntimeError('not implemented'))
@@ -323,12 +328,15 @@ class Train(Common):
         else:
             raise(ValueError(f'not implemented: {loss_func}'))
 
-    def shape_regress_loss_fn(seq, target, mask, model):
-        if not hasattr(model, "predict_shape"):
-            raise RuntimeError("predict_shape(seq) が未実装です。")
-        pred = model.predict_shape(seq)   # (B,N)
-        diff = (pred - target) * mask
-        return (diff.pow(2).sum() / mask.sum().clamp_min(1))
+    def build_shape_regress_loss_function(self, model):
+        """E0: SHAPE回帰(MSE)の損失関数を返すファクトリ"""
+        def shape_e0_loss_fn(seq, target, mask):
+            pred = model.predict_shape(seq)         # ← forwardが辞書なら model(seq)['shape_hat_e0'] に変えてOK
+            # マスク付きMSE
+            diff = (pred - target) * mask
+            denom = mask.sum().clamp_min(1)
+            return diff.pow(2).sum() / denom
+        return shape_e0_loss_fn
 
     def build_scheduler(self, scheduler: str, optimizer: optim.Optimizer, args: Namespace):
         if scheduler == 'CyclicLR':
@@ -386,7 +394,6 @@ class Train(Common):
                 raise ValueError("Multitask には --shape リストが必須です。")
             # 複数ファイルのときは dataset_id ごとに MultiTaskDataset を作って連結
             mt_datasets = []
-            # args.bpseq_list / args.train など、あなたのBPSEQリスト引数名に合わせて置き換えてください
             bpseq_lists = args.input if isinstance(args.input, (list,tuple)) else [args.input]
             shape_lists = args.shape if isinstance(args.shape, (list,tuple)) else [args.shape]
             if len(bpseq_lists) != len(shape_lists):
@@ -396,7 +403,6 @@ class Train(Common):
             train_dataset = ConcatDataset(mt_datasets)
         else:
             raise ValueError(f"unknown task: {task}")
-
 
         # Create generator for reproducible shuffling
         generator = torch.Generator()
@@ -447,16 +453,10 @@ class Train(Common):
 
         loss_fn = {
             'BPSEQ': self.build_loss_function(args.loss_func, model, args), 
-            'SHAPE': self.build_shape_loss_function(args.shape_loss_func, model, args, shape_model=shape_model) 
+            'SHAPE': self.build_shape_loss_function(args.shape_loss_func, model, args, shape_model=shape_model), 
+            'SHAPE_regress': self.build_shape_regress_loss_function(model) 
         }
-        print(args.task)
-        # if args.task == 'Assisted_Folding':
-        #     loss_fn = self.build_shape_loss_function(args.shape_loss_func, model, args, shape_model=shape_model) 
-        # elif args.task == 'Multitask':
-        #     loss_fn = self.build_loss_function(args.loss_func, model, args) 
-        # else:   #Folding
-        #     loss_fn = self.build_loss_function(args.loss_func, model, args) 
-
+       
         loss_weight = { 'BPSEQ': 1.0, 'SHAPE': args.shape_loss_weight, 'MULTI': 1.0 }
         scheduler = self.build_scheduler(args.scheduler, optimizer, args)
 

@@ -152,7 +152,7 @@ class MultiTaskDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
         assert seq_bp == seq_sh, f"seq mismatch for key={k}"
         return (k, seq_bp, {
             'type': 'MULTI',
-            'bpseq': bp_dict,
+            'bpseq': bp_dict['target'],
             'shape_target': sh_dict['target'],
             'shape_mask':   sh_dict['mask'],
             'dataset_id': self.dataset_id

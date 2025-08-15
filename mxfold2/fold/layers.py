@@ -388,7 +388,6 @@ class NeuralNet(nn.Module):
         x_embed = self.embedding(['0' + s for s in seq]).to(device)   # (B, C_in, N)
         return self.shape_head_e0(x_embed.transpose(1, 2)).squeeze(-1)  # (B, N)
 
-
 class NeuralNet1D(nn.Module):
     def __init__(self, embed_size: int = 0,
             num_filters: tuple[int, ...] = (96,), 
@@ -422,8 +421,6 @@ class NeuralNet1D(nn.Module):
         n_in = self.encoder.n_out
         self.fc = nn.Linear(n_in, n_out) if n_in != n_out else None
 
-
-
     def forward(self, seq: list[str]) -> torch.Tensor:
         device = next(self.parameters()).device
         x: torch.Tensor
@@ -433,7 +430,6 @@ class NeuralNet1D(nn.Module):
             x = self.fc(x)
         return x
 
-    ###てすと    
     def predict_shape(self, seq: list[str]) -> torch.Tensor:
         device = next(self.parameters()).device
         x_embed = self.embedding(['0' + s for s in seq]).to(device)   # (B, C_in, N)

@@ -328,11 +328,15 @@ class Train(Common):
         else:
             raise(ValueError(f'not implemented: {loss_func}'))
 
-    def build_shape_regress_loss_function(self, model):
+    def build_shape_regress_loss_function(self, model: AbstractFold):
         """E0: SHAPE回帰(MSE)の損失関数を返すファクトリ"""
         def shape_e0_loss_fn(seq, target, mask):
-            pred = model.predict_shape(seq)         # ← forwardが辞書なら model(seq)['shape_hat_e0'] に変えてOK
+            pred = model.zuker.net.predict_shape(seq)      
             # マスク付きMSE
+            device = pred.device
+            target = target.to(device)
+            mask = mask.to(device)
+            
             diff = (pred - target) * mask
             denom = mask.sum().clamp_min(1)
             return diff.pow(2).sum() / denom

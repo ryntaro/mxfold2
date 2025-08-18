@@ -82,7 +82,7 @@ class Train(Common):
                             msk = vals['shape_mask'][i:i+1]
                             shape_loss = loss_fn['SHAPE_regress'](seq, tgt, msk)
 
-                            alpha, beta = loss_weight['MULTI']
+                            alpha, beta = loss_weight['MULTI_intra']
                             loss = torch.sum(alpha * struct_loss + beta * shape_loss)                        
                         else:
                             raise(RuntimeError('not implemented'))
@@ -394,7 +394,7 @@ class Train(Common):
             if not args.shape:
                raise ValueError("Assisted_Folding には --shape リストが必須です。")
             # ShapeDataset は従来の 'type':'SHAPE' を返すモードで作成
-            shape_dataset = [ ShapeDataset(s, i, task='SHAPE') for i, s in enumerate(args.shape) ]
+            shape_dataset = [ ShapeDataset(s, i) for i, s in enumerate(args.shape) ]
             train_dataset = ConcatDataset([train_dataset] + shape_dataset)
         elif task == 'Multitask':
             # 同一配列で BPSEQ + SHAPE を同時学習
@@ -465,7 +465,7 @@ class Train(Common):
             'SHAPE_regress': self.build_shape_regress_loss_function(model) 
         }
        
-        loss_weight = { 'BPSEQ': 1.0, 'SHAPE': args.shape_loss_weight, 'MULTI': (args.mt_alpha, args.mt_beta) }
+        loss_weight = { 'BPSEQ': 1.0, 'SHAPE': args.shape_loss_weight, 'MULTI': 1.0, 'MULTI_intra': (args.mt_alpha, args.mt_beta) }
         scheduler = self.build_scheduler(args.scheduler, optimizer, args)
 
         # Initialize GradScaler for mixed precision training
@@ -565,9 +565,10 @@ class Train(Common):
                             default='WARNING', help="set the log level ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
         subparser.add_argument('--use-amp', action='store_true',
                             help='use automatic mixed precision (AMP) for faster training on GPUs')
-        subparser.add_argument('--task', choices=('Folding', 'Assisted_Folding', 'Multitask'),
-                            default='Folding', help="'Folding', 'Assisted_Folding', 'Multitask'")
-
+        # subparser.add_argument('--task', choices=('Folding', 'Assisted_Folding', 'Multitask'),
+        #                     default='Folding', help="'Folding', 'Assisted_Folding', 'Multitask'")
+        cls.add_task_args(subparser)
+        
         cls.add_fold_args(subparser)
 
         gparser = subparser.add_argument_group("Setting for optimizer")

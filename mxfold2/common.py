@@ -193,3 +193,10 @@ class Common:
         #                 help='the input dimension of the bilinear layer of LinearFold model (default: 4)')
         gparser.add_argument('--paired-opt', choices=('0_1_1', 'fixed', 'symmetric'), default='symmetric')
         gparser.add_argument('--mix-type', choices=('add', 'average'), default='average')
+
+    @classmethod
+    def add_task_args(cls, subparser):
+        gparser = subparser.add_argument_group("Task setting")
+        gparser.add_argument('--task', choices=('Folding','Assisted_Folding','Multitask'),
+                            default='Folding',
+                            help="Task type: 'Folding', 'Assisted_Folding', or 'Multitask'")

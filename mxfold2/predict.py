@@ -25,7 +25,6 @@ class Predict(Common):
     def __init__(self):
         super(Predict, self).__init__()
 
-
     def predict(self, 
                 model: AbstractFold | AveragedModel,
                 data_loader: DataLoader,
@@ -52,10 +51,16 @@ class Predict(Common):
                     constraint = [ tgt if tp=='BPSEQ' else None for tp, tgt in zip(vals['type'], vals['target'])]
                 else:
                     constraint = None
-                pseudoenergy = [ 
-                    self.load_shape_reactivity(shape_file, shape_intercept, shape_slope) \
-                        if shape_file is not None else None \
-                        for shape_file in shape_list[seq_processed:seq_processed+len(seqs)] ]
+                # Assisted_Foldingの場合はシュードエナジーが必要。それ以外はいらない    
+                if args.task == "Assisted_Folding":
+                    pseudoenergy = [
+                        self.load_shape_reactivity(shape_file, shape_intercept, shape_slope)
+                        if shape_file is not None else None
+                        for shape_file in shape_list[seq_processed:seq_processed+len(seqs)]
+                    ]
+                else:
+                    pseudoenergy = [None] * len(seqs)
+                
                 seq_processed += len(seqs)
                 
                 # Use autocast for mixed precision inference
@@ -63,18 +68,37 @@ class Predict(Common):
                     if output_bpp is None:
                         scs, preds, bps = model(seqs, constraint=constraint, pseudoenergy=pseudoenergy)
                         pfs = bpps = [None] * len(preds)
+                        # shape 回帰
+                        if args.task == 'Multitask':
+                            pred_shapes = model.zuker.net.predict_shape(seqs)
+
                     else:
                         scs, preds, bps, pfs, bpps = model(seqs, return_partfunc=True, constraint=constraint, pseudoenergy=pseudoenergy)
+                # マルチタスクの時はシェイプもかえす
+                pred_shapes = None
+                if args.task == "Multitask":
+                    shp_pred = model.zuker.net.predict_shape(seqs)
+                    pred_shapes = shp_pred.float().cpu().numpy()
+
                 elapsed_time = time.time() - start
                 for header, seq, ref, sc, pred, bp, pf, bpp in zip(headers, seqs, vals['target'], scs, preds, bps, pfs, bpps):
                     if output_bpseq is None:
                         print('>'+header)
                         print(seq)
                         print(pred, f'({sc:.1f})')
+                        if args.task == "Multitask" and pred_shapes is not None:
+                            shp = pred_shapes[seq_index]   # (N,)
+                            shp_line = " ".join(f"{val:.3f}" for val in shp)
+                            print(shp_line)
+
                     elif output_bpseq == "stdout":
                         print(f'# {header} (s={sc:.1f}, {elapsed_time:.5f}s)')
                         for i in range(1, len(bp)):
-                            print(f'{i}\t{seq[i-1]}\t{bp[i]}')
+                            if args.task == "Multitask" and pred_shapes is not None:
+                                print(f'{i}\t{seq[i-1]}\t{bp[i]}\t{pred_shapes[seq_index][i-1]:.3f}')
+                            else:
+                                print(f'{i}\t{seq[i-1]}\t{bp[i]}')
+
                     else:
                         fn = os.path.basename(header)
                         fn = os.path.splitext(fn)[0] 
@@ -83,6 +107,7 @@ class Predict(Common):
                             print(f'# {header} (s={sc:.1f}, {elapsed_time:.5f}s)', file=f)
                             for i in range(1, len(bp)):
                                 print(f'{i}\t{seq[i-1]}\t{bp[i]}', file=f)
+                                
                     if res_fn is not None:
                         x = compare_bpseq(ref, bp)
                         x = [header, len(seq), elapsed_time, sc.item()] + list(x) + list(accuracy(*x))
@@ -199,6 +224,8 @@ class Predict(Common):
                             help='Specify a slope used with SHAPE restraints. Default is 2.6.')
         subparser.add_argument('--use-amp', action='store_true',
                             help='use automatic mixed precision (AMP) for faster inference on GPUs')
+
+        cls.add_task_args(subparser)
 
         cls.add_fold_args(subparser)
         cls.add_network_args(subparser)

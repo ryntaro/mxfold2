@@ -37,7 +37,7 @@ class FastaDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
 
 
 class BPseqDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
-    def __init__(self, bpseq_list: str, dataset_id: int) -> None:
+    def __init__(self, bpseq_list: str, dataset_id: int = 0) -> None:
         super(Dataset, self).__init__()
         self.data = []
         with open(bpseq_list) as f:

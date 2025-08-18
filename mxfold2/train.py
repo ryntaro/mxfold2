@@ -76,13 +76,14 @@ class Train(Common):
                         elif vals['type'][i]=='MULTI':
                             seq = seqs[i:i+1]
                             # 構造ロス
-                            struct_loss = torch.sum(loss_fn['BPSEQ'](seq, vals['bpseq'][i:i+1], fname=fnames[i:i+1]))
+                            struct_loss = loss_fn['BPSEQ'](seq, vals['bpseq'][i:i+1], fname=fnames[i:i+1])
                             # shape回帰ロス 関数化したかったがloss_fnにくわえるのが難しそうなので直で書くことにした
                             tgt = vals['shape_target'][i:i+1]
                             msk = vals['shape_mask'][i:i+1]
                             shape_loss = loss_fn['SHAPE_regress'](seq, tgt, msk)
 
-                            loss = args.mt_alpha * struct_loss + args.mt_beta * shape_loss                        
+                            alpha, beta = loss_weight['MULTI']
+                            loss = torch.sum(alpha * struct_loss + beta * shape_loss)                        
                         else:
                             raise(RuntimeError('not implemented'))
                         # 交互学習のためにタスク形式で重みが異なる
@@ -374,6 +375,9 @@ class Train(Common):
         if args.log_dir is not None and 'SummaryWriter' in globals():
             self.writer = SummaryWriter(log_dir=args.log_dir)
         
+        self.mt_alpha = args.mt_alpha
+        self.mt_beta = args.mt_beta
+
         # train_dataset = BPseqDataset(args.input)
         # if args.shape is not None:
         #     shape_dataset = [ ShapeDataset(s, i) for i, s in enumerate(args.shape) ]
@@ -461,7 +465,7 @@ class Train(Common):
             'SHAPE_regress': self.build_shape_regress_loss_function(model) 
         }
        
-        loss_weight = { 'BPSEQ': 1.0, 'SHAPE': args.shape_loss_weight, 'MULTI': 1.0 }
+        loss_weight = { 'BPSEQ': 1.0, 'SHAPE': args.shape_loss_weight, 'MULTI': (args.mt_alpha, args.mt_beta) }
         scheduler = self.build_scheduler(args.scheduler, optimizer, args)
 
         # Initialize GradScaler for mixed precision training
@@ -621,7 +625,7 @@ class Train(Common):
         subparser.add_argument('--shape-slope', type=float, default=2.6, 
                             help='Specify a slope used with SHAPE restraints. Default is 2.6.')
         gparser.add_argument('--shape-loss-weight', type=float, default=1.,
-                            help='weight for SHAPE loss function (default=1)')
+                            help='weight for SHAPE loss function (default=1) shape/shapeなしの交互学習における重み RNA間の重み')
         gparser.add_argument('--mt-alpha', type=float, default=1.0, help='multitask: weight for structure loss')
         gparser.add_argument('--mt-beta',  type=float, default=1.0, help='multitask: weight for SHAPE loss')
 

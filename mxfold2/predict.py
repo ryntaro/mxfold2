@@ -140,6 +140,7 @@ class Predict(Common):
                                 mse, r2, corr = np.nan, np.nan, np.nan
 
                             struct_metrics += [mse, r2, corr]
+                            # struct_metrics += [round(mse, 3), round(r2, 3), round(corr, 3)]
 
                         res_fn.write(', '.join([str(v) for v in struct_metrics]) + "\n")
                             

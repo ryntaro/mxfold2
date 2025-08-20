@@ -6,6 +6,7 @@ import time
 from argparse import Namespace
 from pathlib import Path
 from typing import Optional
+import numpy as np
 
 import torch
 #import torch.nn as nn
@@ -16,7 +17,7 @@ from torch.utils.data import DataLoader
 
 from . import interface
 from .compbpseq import accuracy, compare_bpseq
-from .dataset import BPseqDataset, FastaDataset
+from .dataset import BPseqDataset, FastaDataset, MultiTaskDataset
 from .fold.fold import AbstractFold
 from .common import Common
 
@@ -28,6 +29,7 @@ class Predict(Common):
     def predict(self, 
                 model: AbstractFold | AveragedModel,
                 data_loader: DataLoader,
+                task: str,
                 output_bpseq: Optional[str] = None, 
                 output_bpp: Optional[str] = None, 
                 result: Optional[str] = None, 
@@ -35,7 +37,8 @@ class Predict(Common):
                 shape_list: Optional[list[str]] = None,
                 shape_intercept: float = 0.0,
                 shape_slope: float = 0.0,
-                use_amp: bool = False) -> None:
+                use_amp: bool = False,
+                ) -> None:
 
         res_fn = open(result, 'w') if result is not None else None
         shape_list = [None] * len(data_loader) if shape_list is None else shape_list
@@ -52,7 +55,7 @@ class Predict(Common):
                 else:
                     constraint = None
                 # Assisted_Foldingの場合はシュードエナジーが必要。それ以外はいらない    
-                if args.task == "Assisted_Folding":
+                if task == "Assisted_Folding":
                     pseudoenergy = [
                         self.load_shape_reactivity(shape_file, shape_intercept, shape_slope)
                         if shape_file is not None else None
@@ -68,34 +71,37 @@ class Predict(Common):
                     if output_bpp is None:
                         scs, preds, bps = model(seqs, constraint=constraint, pseudoenergy=pseudoenergy)
                         pfs = bpps = [None] * len(preds)
-                        # shape 回帰
-                        if args.task == 'Multitask':
-                            pred_shapes = model.zuker.net.predict_shape(seqs)
 
                     else:
                         scs, preds, bps, pfs, bpps = model(seqs, return_partfunc=True, constraint=constraint, pseudoenergy=pseudoenergy)
                 # マルチタスクの時はシェイプもかえす
-                pred_shapes = None
-                if args.task == "Multitask":
+                if task == "Multitask":
                     shp_pred = model.zuker.net.predict_shape(seqs)
                     pred_shapes = shp_pred.float().cpu().numpy()
+                else:
+                    pred_shapes = [None] * len(seqs)
 
                 elapsed_time = time.time() - start
-                for header, seq, ref, sc, pred, bp, pf, bpp in zip(headers, seqs, vals['target'], scs, preds, bps, pfs, bpps):
-                    if output_bpseq is None:
+                # for header, seq, ref, sc, pred, bp, pf, bpp, shp in zip(headers, seqs, vals['target'], scs, preds, bps, pfs, bpps, pred_shapes):
+                for i, (header, seq, sc, pred, bp, pf, bpp, shp) in enumerate(
+                                zip(headers, seqs, scs, preds, bps, pfs, bpps, pred_shapes)):       
+                    ref = vals['target'][i]
+
+                    if output_bpseq is None:# コマンドラインへの出力　
                         print('>'+header)
                         print(seq)
                         print(pred, f'({sc:.1f})')
-                        if args.task == "Multitask" and pred_shapes is not None:
-                            shp = pred_shapes[seq_index]   # (N,)
+                        # ドットブラケットの下にシェイプを表示
+                        if task == "Multitask" and shp is not None:
                             shp_line = " ".join(f"{val:.3f}" for val in shp)
                             print(shp_line)
 
-                    elif output_bpseq == "stdout":
+                    elif output_bpseq == "stdout": # bpseq出力
                         print(f'# {header} (s={sc:.1f}, {elapsed_time:.5f}s)')
                         for i in range(1, len(bp)):
-                            if args.task == "Multitask" and pred_shapes is not None:
-                                print(f'{i}\t{seq[i-1]}\t{bp[i]}\t{pred_shapes[seq_index][i-1]:.3f}')
+                            # 4列目にシェイプを書き加える
+                            if task == "Multitask" and shp is not None:
+                                print(f'{i}\t{seq[i-1]}\t{bp[i]}\t{shp[i-1]:.3f}')
                             else:
                                 print(f'{i}\t{seq[i-1]}\t{bp[i]}')
 
@@ -106,12 +112,37 @@ class Predict(Common):
                         with open(fn, "w") as f:
                             print(f'# {header} (s={sc:.1f}, {elapsed_time:.5f}s)', file=f)
                             for i in range(1, len(bp)):
-                                print(f'{i}\t{seq[i-1]}\t{bp[i]}', file=f)
-                                
+                                # print(f'{i}\t{seq[i-1]}\t{bp[i]}', file=f)
+                                if task == "Multitask" and shp is not None:
+                                    print(f'{i}\t{seq[i-1]}\t{bp[i]}\t{shp[i-1]:.3f}', file=f)
+                                else:
+                                    print(f'{i}\t{seq[i-1]}\t{bp[i]}')
+
                     if res_fn is not None:
                         x = compare_bpseq(ref, bp)
-                        x = [header, len(seq), elapsed_time, sc.item()] + list(x) + list(accuracy(*x))
-                        res_fn.write(', '.join([str(v) for v in x]) + "\n")
+                        struct_metrics = [header, len(seq), elapsed_time, sc.item()] + list(x) + list(accuracy(*x))
+
+                        # --- Multitask のときだけ SHAPE 評価を追加 ---
+                        if task == "Multitask" and pred_shapes is not None:
+                            shp_true = vals['shape_target'][0].cpu().numpy()
+                            shp_mask = vals['shape_mask'][0].cpu().numpy()
+                            shp_pred = shp
+
+                            valid = shp_mask > 0
+                            if valid.sum() > 0:
+                                y_true = shp_true[valid]
+                                y_pred = shp_pred[valid]
+
+                                mse = np.mean((y_pred - y_true) ** 2)
+                                r2 = 1 - ((y_pred - y_true)**2).sum() / ((y_true - y_true.mean())**2).sum()
+                                corr = np.corrcoef(y_pred, y_true)[0,1]
+                            else:
+                                mse, r2, corr = np.nan, np.nan, np.nan
+
+                            struct_metrics += [mse, r2, corr]
+
+                        res_fn.write(', '.join([str(v) for v in struct_metrics]) + "\n")
+                            
                     if output_bpp is not None:
                         fn = os.path.basename(header)
                         fn = os.path.splitext(fn)[0] 
@@ -128,9 +159,24 @@ class Predict(Common):
         torch.set_num_threads(args.threads)
         interface.set_num_threads(args.threads)
 
-        test_dataset = FastaDataset(args.input)
-        if len(test_dataset) == 0:
+        # test_dataset = FastaDataset(args.input)
+        # if len(test_dataset) == 0:
+        #     test_dataset = BPseqDataset(args.input)
+
+        # まずFASTAかBPSEQかを判定
+        tmp = FastaDataset(args.input)
+        is_fasta = len(tmp) > 0
+
+        if args.task == "Multitask":
+            # Multitask なら必ずBPSEQ+SHAPEが必要
+            if args.shape is None:
+                raise ValueError("Multitask requires --shape (SHAPE file list)")
+            test_dataset = MultiTaskDataset(bpseq_list=args.input, shape_list=args.shape, dataset_id=0)
+        elif is_fasta:
+            test_dataset = tmp  # FastaDataset
+        else:
             test_dataset = BPseqDataset(args.input)
+
         test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
         if args.seed >= 0:
@@ -142,7 +188,7 @@ class Predict(Common):
             param = Path(args.param)
             if not param.exists() and conf is not None:
                 param = Path(conf).parent / param
-            p = torch.load(param, map_location='cpu')
+            p = torch.load(param, map_location='cpu',weights_only=True)
             if isinstance(p, dict) and 'model_state_dict' in p:
                 p = p['model_state_dict']
             if 'n_averaged' in p:
@@ -170,7 +216,7 @@ class Predict(Common):
                     result=args.result, use_constraint=args.use_constraint,
                     shape_list=shape_list,
                     shape_intercept=args.shape_intercept, shape_slope=args.shape_slope,
-                    use_amp=use_amp)
+                    use_amp=use_amp, task=args.task)
 
 
     def load_shape_reactivity(self, fname: str, intercept: float = -0.8, slope: float = 2.6) -> torch.tensor:

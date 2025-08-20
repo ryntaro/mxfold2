@@ -76,7 +76,7 @@ class Train(Common):
                         elif vals['type'][i]=='MULTI':
                             seq = seqs[i:i+1]
                             # 構造ロス
-                            struct_loss = loss_fn['BPSEQ'](seq, vals['bpseq'][i:i+1], fname=fnames[i:i+1])
+                            struct_loss = loss_fn['BPSEQ'](seq, vals['target'][i:i+1], fname=fnames[i:i+1])
                             # shape回帰ロス 関数化したかったがloss_fnにくわえるのが難しそうなので直で書くことにした
                             tgt = vals['shape_target'][i:i+1]
                             msk = vals['shape_mask'][i:i+1]
@@ -150,7 +150,7 @@ class Train(Common):
                         elif vals['type'][i]=='MULTI':
                             seq = seqs[i:i+1]
                             # 構造ロス
-                            struct_loss = torch.sum(loss_fn['BPSEQ'](seq, vals['bpseq'][i:i+1], fname=fnames[i:i+1]))
+                            struct_loss = torch.sum(loss_fn['BPSEQ'](seq, vals['target'][i:i+1], fname=fnames[i:i+1]))
                             # shape回帰ロス
                             tgt = vals['shape_target'][i:i+1]
                             msk = vals['shape_mask'][i:i+1]

@@ -156,7 +156,7 @@ class Train(Common):
                             msk = vals['shape_mask'][i:i+1]
                             shape_loss = loss_fn['SHAPE_regress'](seq, tgt, msk)
 
-                            loss = args.mt_alpha * struct_loss + args.mt_beta * shape_loss                        
+                            loss = self.mt_alpha * struct_loss + self.mt_beta * shape_loss                        
                         else:
                             raise(RuntimeError('not implemented'))
                     loss_total += loss.item()

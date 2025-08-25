@@ -87,7 +87,9 @@ class Predict(Common):
                                 zip(headers, seqs, scs, preds, bps, pfs, bpps, pred_shapes)):       
                     ref = vals['target'][i]
 
+
                     if output_bpseq is None:# コマンドラインへの出力　
+
                         print('>'+header)
                         print(seq)
                         print(pred, f'({sc:.1f})')
@@ -97,6 +99,7 @@ class Predict(Common):
                             print(shp_line)
 
                     elif output_bpseq == "stdout": # bpseq出力
+
                         print(f'# {header} (s={sc:.1f}, {elapsed_time:.5f}s)')
                         for i in range(1, len(bp)):
                             # 4列目にシェイプを書き加える
@@ -106,6 +109,7 @@ class Predict(Common):
                                 print(f'{i}\t{seq[i-1]}\t{bp[i]}')
 
                     else:
+
                         fn = os.path.basename(header)
                         fn = os.path.splitext(fn)[0] 
                         fn = os.path.join(output_bpseq, fn+".bpseq")
@@ -167,7 +171,6 @@ class Predict(Common):
         # まずFASTAかBPSEQかを判定
         tmp = FastaDataset(args.input)
         is_fasta = len(tmp) > 0
-
         if args.task == "Multitask":
             # Multitask なら必ずBPSEQ+SHAPEが必要
             if args.shape is None:
@@ -177,7 +180,7 @@ class Predict(Common):
             test_dataset = tmp  # FastaDataset
         else:
             test_dataset = BPseqDataset(args.input)
-
+        
         test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
         if args.seed >= 0:

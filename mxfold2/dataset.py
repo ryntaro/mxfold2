@@ -5,6 +5,7 @@ from typing import Generator, Any
 
 import torch
 from torch.utils.data import Dataset
+import os
 
 
 class FastaDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
@@ -38,8 +39,10 @@ class FastaDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
 
 class BPseqDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
     def __init__(self, bpseq_list: str, dataset_id: int = 0) -> None:
+
         super(Dataset, self).__init__()
         self.data = []
+
         with open(bpseq_list) as f:
             for l in f:
                 l = l.rstrip('\n').split()
@@ -52,6 +55,7 @@ class BPseqDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
         return self.data[idx]
 
     def read(self, filename: str, dataset_id: int) -> tuple[str, str, dict[str, torch.Tensor]]:
+
         with open(filename) as f:
             p: list[int] = [0]
             s = ['']

@@ -109,7 +109,6 @@ class Predict(Common):
                                 print(f'{i}\t{seq[i-1]}\t{bp[i]}')
 
                     else:
-
                         fn = os.path.basename(header)
                         fn = os.path.splitext(fn)[0] 
                         fn = os.path.join(output_bpseq, fn+".bpseq")
@@ -120,7 +119,7 @@ class Predict(Common):
                                 if task == "Multitask" and shp is not None:
                                     print(f'{i}\t{seq[i-1]}\t{bp[i]}\t{shp[i-1]:.3f}', file=f)
                                 else:
-                                    print(f'{i}\t{seq[i-1]}\t{bp[i]}')
+                                    print(f'{i}\t{seq[i-1]}\t{bp[i]}', file=f)
 
                     if res_fn is not None:
                         x = compare_bpseq(ref, bp)

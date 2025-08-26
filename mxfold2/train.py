@@ -150,13 +150,17 @@ class Train(Common):
                         elif vals['type'][i]=='MULTI':
                             seq = seqs[i:i+1]
                             # 構造ロス
-                            struct_loss = torch.sum(loss_fn['BPSEQ'](seq, vals['target'][i:i+1], fname=fnames[i:i+1]))
+                            struct_loss = loss_fn['BPSEQ'](seq, vals['target'][i:i+1], fname=fnames[i:i+1])
                             # shape回帰ロス
                             tgt = vals['shape_target'][i:i+1]
                             msk = vals['shape_mask'][i:i+1]
                             shape_loss = loss_fn['SHAPE_regress'](seq, tgt, msk)
 
-                            loss = self.mt_alpha * struct_loss + self.mt_beta * shape_loss                        
+                            # loss = self.mt_alpha * struct_loss + self.mt_beta * shape_loss                        
+                            
+                            alpha, beta = loss_weight['MULTI_intra']
+                            loss = torch.sum(alpha * struct_loss + beta * shape_loss)                        
+                       
                         else:
                             raise(RuntimeError('not implemented'))
                     loss_total += loss.item()

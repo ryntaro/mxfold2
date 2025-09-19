@@ -158,7 +158,6 @@ class Predict(Common):
                                     print(f"{j}:{p:.3f}", end=' ', file=f)
                                 print(file=f)
 
-
     def run(self, args: Namespace, conf: Optional[str] = None) -> None:
         torch.set_num_threads(args.threads)
         interface.set_num_threads(args.threads)

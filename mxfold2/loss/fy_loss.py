@@ -40,6 +40,7 @@ class FenchelYoungLoss(nn.Module):
         ref, ref_s, _ = self.model(seq, param=param_without_perturb, constraint=pairs, max_internal_length=None)
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         loss = (pred - ref) / l
+        # たぶんslは熱力学的正則化なんだろう
         if self.sl_weight > 0.0:
             with torch.no_grad():
                 ref2: torch.Tensor

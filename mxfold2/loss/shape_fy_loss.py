@@ -37,11 +37,13 @@ class ShapeFenchelYoungLoss(nn.Module):
         pred: torch.Tensor
         pred_s: list[str]
         #pred_model = self.model.duplicate()
+        # シュードエナジーなし　普通に２次構造予測
         pred, pred_s, _, _, param_without_perturb = self.model(seq, return_param=True, perturb=self.perturb)
         ref: torch.Tensor
         ref_s: list[str]
         #ref_model = self.model.duplicate()
         pseudoenergy = [ self.calc_pseudoenergy(r) for r in targets ]
+        # シュードエナジーあり
         ref, ref_s, ref_stru = self.model(seq, param=param_without_perturb, pseudoenergy=pseudoenergy)
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         loss = (pred - ref) / l
@@ -61,6 +63,7 @@ class ShapeFenchelYoungLoss(nn.Module):
 
         if self.l1_weight > 0.0:
             for p in self.model.parameters():
+                # パラメータのl1ノルムで正則化
                 loss += self.l1_weight * torch.sum(torch.abs(p))
 
         # if self.l2_weight > 0.0:

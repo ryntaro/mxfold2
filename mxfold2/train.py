@@ -43,6 +43,7 @@ class Train(Common):
 
     def __init__(self):
         super(Train, self).__init__()
+        self.log_file = None   # ここでは設定しない
 
 
     def train(self, epoch: int, model: AbstractFold, optimizer: optim.Optimizer, 
@@ -124,8 +125,16 @@ class Train(Common):
                     if self.writer is not None:
                         self.writer.add_scalar("train/loss", running_loss, (epoch-1) * n_dataset + num)
                     running_loss, n_running_loss = 0, 0
+        # elapsed_time = time.time() - start
+        # print('Train Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
+
         elapsed_time = time.time() - start
-        print('Train Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
+        avg_loss = loss_total / num
+        log_line = f"Train Epoch: {epoch}\tLoss: {avg_loss:.6f}\tTime: {elapsed_time:.3f}s"
+        print(log_line)
+
+        with open(self.log_file, "a") as f:
+            f.write(f"{epoch},train,{avg_loss:.6f},{elapsed_time:.3f}\n")
 
 
     def test(self, epoch: int, model: AbstractFold | AveragedModel, 
@@ -168,10 +177,18 @@ class Train(Common):
                 pbar.set_postfix(test_loss='{:.3e}'.format(loss_total / num))
                 pbar.update(n_batch)
 
+        # elapsed_time = time.time() - start
+        # if self.writer is not None:
+        #     self.writer.add_scalar("test/loss", loss_total / num, epoch * n_dataset)
+        # print('Test Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
+
         elapsed_time = time.time() - start
-        if self.writer is not None:
-            self.writer.add_scalar("test/loss", loss_total / num, epoch * n_dataset)
-        print('Test Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
+        avg_loss = loss_total / num
+        log_line = f"Test Epoch: {epoch}\tLoss: {avg_loss:.6f}\tTime: {elapsed_time:.3f}s"
+        print(log_line)
+
+        with open(self.log_file, "a") as f:
+            f.write(f"{epoch},test,{avg_loss:.6f},{elapsed_time:.3f}\n")
 
 
     def save_checkpoint(self, outdir: str, epoch: int, 
@@ -330,6 +347,14 @@ class Train(Common):
                             shape_intercept=args.shape_intercept, shape_slope=args.shape_slope,
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight,
                             sl_weight=args.score_loss_weight)
+
+        if loss_func == 'shape_mse':
+            from .loss.shape_mse_loss import ShapeMSELoss
+            return ShapeMSELoss(model=model,
+                            perturb=args.shape_perturb, nu=args.shape_nu, 
+                            l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+                            sl_weight=0.)
+
         else:
             raise(ValueError(f'not implemented: {loss_func}'))
 
@@ -381,6 +406,17 @@ class Train(Common):
         
         self.mt_alpha = args.mt_alpha
         self.mt_beta = args.mt_beta
+
+        # loss.log の出力先を log_dir に変更
+        if args.log_dir is not None:
+            os.makedirs(args.log_dir, exist_ok=True)
+            self.log_file = os.path.join(args.log_dir, "loss.log")
+        else:
+            os.makedirs("logs", exist_ok=True)
+            self.log_file = os.path.join("logs", "loss.log")
+        # ファイルをリセット
+        with open(self.log_file, "w") as f:
+            f.write("epoch,phase,loss,time\n")
 
         # train_dataset = BPseqDataset(args.input)
         # if args.shape is not None:
@@ -524,8 +560,9 @@ class Train(Common):
             torch.save((swa_model or model).state_dict(), args.param)
         if args.save_config is not None:
             self.save_config(args.save_config, config)
-
+        
         #return self.model
+
 
 
     @classmethod
@@ -619,7 +656,7 @@ class Train(Common):
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
         gparser.add_argument('--shape-model', choices=('Wu', 'Foo'), default='Wu',
                             help="shape model (default: Wu)")
-        gparser.add_argument('--shape-loss-func', choices=('shape_nll', 'shape_fy'), default='shape_nll',
+        gparser.add_argument('--shape-loss-func', choices=('shape_nll', 'shape_fy', 'shape_mse'), default='shape_nll',
                             help="loss fuction for SHAPE training data (default: shape)")
         gparser.add_argument('--shape-perturb', type=float, default=0.1,
                             help='standard deviation of perturbation for shape loss (default: 0.1)')

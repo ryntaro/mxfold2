@@ -67,7 +67,7 @@ class ShapeMSELoss(nn.Module):
         valid_count = 0
         for proxy, t in zip(proxies, targets):
             # mask: target が 0〜2 の範囲内だけ有効
-            mask = (t >= 0.0) & (t <= 2.0)
+            mask = t >= -1
             if mask.sum() == 0:
                 continue
             proxy_masked = proxy[mask]
@@ -84,7 +84,7 @@ class ShapeMSELoss(nn.Module):
         # --- 勾配計算 ---
         mses.backward(retain_graph=True)
         grads = [p.grad for p in paired]
-
+        
         # --- pseudoenergy を付与して再fold ---
         ref: torch.Tensor
         ref_s: list[str]
@@ -102,6 +102,11 @@ class ShapeMSELoss(nn.Module):
                     if kk.startswith("count_"):
                         ref_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
 
+        # for i, (pc, rc) in enumerate(zip(pred_counts, ref_counts)):
+        #     diff = pc - rc
+        #     print(f"diff[{i}] min={diff.min().item()} max={diff.max().item()} mean={diff.mean().item()}")
+
+
         # --- ADwrapper ---
         class ADwrapper(torch.autograd.Function):
             @staticmethod
@@ -113,7 +118,8 @@ class ShapeMSELoss(nn.Module):
                 return tuple(p - r for p, r in zip(pred_counts, ref_counts))
 
         loss = ADwrapper.apply(*pred_params)
-
+        
+        
         # --- オプション: Turner 正則化 ---
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         if self.sl_weight > 0.0:
@@ -139,10 +145,10 @@ class ShapeMSELoss(nn.Module):
                 loss += self.l1_weight * torch.sum(torch.abs(p))
 
         # --- L2 正則化 ---
-        if self.l2_weight > 0.0:
-            l2_reg = 0.0
-            for p in self.model.parameters():
-                l2_reg += torch.sum(p ** 2)
-            loss += self.l2_weight * l2_reg
+        # if self.l2_weight > 0.0:
+        #     l2_reg = 0.0
+        #     for p in self.model.parameters():
+        #         l2_reg += torch.sum(p ** 2)
+        #     loss += self.l2_weight * l2_reg
 
         return loss

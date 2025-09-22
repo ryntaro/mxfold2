@@ -59,14 +59,27 @@ class ShapeMSELoss(nn.Module):
             paired.append(p)
         targets = [t.to(pred.device) for t in targets]
 
-        # --- SHAPE proxy = 2*(1 - paired) ---
+        # --- 3. SHAPE proxy = 2*(1 - paired) ---
         proxies = [2.0 * (1.0 - p) for p in paired]
 
-        # --- MSE を計算 ---
+        # --- 4. MSE を計算 (mask付き) ---
         mses = 0.0
+        valid_count = 0
         for proxy, t in zip(proxies, targets):
-            mses = mses + torch.mean((proxy - t) ** 2)
-        mses = mses / len(proxies)
+            # mask: target が 0〜2 の範囲内だけ有効
+            mask = (t >= 0.0) & (t <= 2.0)
+            if mask.sum() == 0:
+                continue
+            proxy_masked = proxy[mask]
+            target_masked = t[mask]
+            mses = mses + torch.mean((proxy_masked - target_masked) ** 2)
+            valid_count += 1
+
+        if valid_count > 0:
+            mses = mses / valid_count
+        else:
+            mses = torch.tensor(0.0, device=pred.device, requires_grad=True)
+
 
         # --- 勾配計算 ---
         mses.backward(retain_graph=True)

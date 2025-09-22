@@ -87,6 +87,11 @@ class Train(Common):
                             loss = torch.sum(alpha * struct_loss + beta * shape_loss)                        
                         else:
                             raise(RuntimeError('not implemented'))
+
+                        if torch.isnan(loss) or torch.isinf(loss):
+                            logging.warning(f"Skip NaN sample: {fnames[i]}")
+                            continue
+
                         # 交互学習のためにタスク形式で重みが異なる
                         loss = loss * loss_weight[vals['type'][i]]
                     

@@ -331,6 +331,9 @@ class Train(Common):
         elif args.shape_model == 'Foo':
             from .fold.shape_layers import Foo
             return Foo(p_alpha=0.540, p_beta=1.390, u_alpha=1.006, u_beta=1.404)
+        elif args.shape_model == 'MLP':
+            from .loss.predict_shape import ShapeMLP
+            return ShapeMLP()
         else:
             raise(ValueError(f'not implemented: {args.shape_model}'))
 
@@ -356,6 +359,7 @@ class Train(Common):
         if loss_func == 'shape_mse':
             from .loss.shape_mse_loss import ShapeMSELoss
             return ShapeMSELoss(model=model,
+                            shape_model=shape_model,
                             perturb=args.shape_perturb, nu=args.shape_nu, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight,
                             sl_weight=0.)
@@ -659,8 +663,8 @@ class Train(Common):
                             help='the penalty for positive unpaired bases for loss augmentation (default: 0)')
         gparser.add_argument('--loss-neg-unpaired', type=float, default=0.,
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
-        gparser.add_argument('--shape-model', choices=('Wu', 'Foo'), default='Wu',
-                            help="shape model (default: Wu)")
+        gparser.add_argument('--shape-model', choices=('Wu', 'Foo', 'MLP'), default='Wu',
+                            help="shape model nll->Wu, Foo, MSE-> MLP (default: Wu)")
         gparser.add_argument('--shape-loss-func', choices=('shape_nll', 'shape_fy', 'shape_mse'), default='shape_nll',
                             help="loss fuction for SHAPE training data (default: shape)")
         gparser.add_argument('--shape-perturb', type=float, default=0.1,

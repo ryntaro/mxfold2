@@ -9,19 +9,25 @@ import torch.autograd
 
 from ..fold.fold import AbstractFold
 
+from predict_shape import ShapeMLP   # ← 新しく追加
 
 class ShapeMSELoss(nn.Module):
     def __init__(self, model: AbstractFold,
+                 shape_model: list[nn.Module],
                  perturb: float = 0., nu: float = 0.1,
                  l1_weight: float = 0., l2_weight: float = 0.,
                  sl_weight: float = 0.) -> None:
         super(ShapeMSELoss, self).__init__()
         self.model = model
+        self.shape_model = shape_model
         self.perturb = perturb
         self.nu = nu
         self.l1_weight = l1_weight
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
+
+        self.shape_predictor = ShapeMLP(hidden_dim=64)
+
         if sl_weight > 0.0:
             from .. import param_turner2004
             from ..fold.rnafold import RNAFold
@@ -59,27 +65,8 @@ class ShapeMSELoss(nn.Module):
             paired.append(p)
         targets = [t.to(pred.device) for t in targets]
 
-        # --- 3. SHAPE proxy = 2*(1 - paired) ---
-        proxies = [2.0 * (1.0 - p) for p in paired]
-
-        # --- 4. MSE を計算 (mask付き) ---
-        mses = 0.0
-        valid_count = 0
-        for proxy, t in zip(proxies, targets):
-            # mask: target が 0〜2 の範囲内だけ有効
-            mask = t >= -1
-            if mask.sum() == 0:
-                continue
-            proxy_masked = proxy[mask]
-            target_masked = t[mask]
-            mses = mses + torch.mean((proxy_masked - target_masked) ** 2)
-            valid_count += 1
-
-        if valid_count > 0:
-            mses = mses / valid_count
-        else:
-            mses = torch.tensor(0.0, device=pred.device, requires_grad=True)
-
+        # --- proxyの代わりに ShapeMLP を呼ぶ ---
+        mses = self.shape_model[dataset_id](seq, paired, targets)
 
         # --- 勾配計算 ---
         mses.backward(retain_graph=True)
@@ -101,11 +88,6 @@ class ShapeMSELoss(nn.Module):
                 for kk in sorted(param[0][k].keys()):
                     if kk.startswith("count_"):
                         ref_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
-
-        # for i, (pc, rc) in enumerate(zip(pred_counts, ref_counts)):
-        #     diff = pc - rc
-        #     print(f"diff[{i}] min={diff.min().item()} max={diff.max().item()} mean={diff.mean().item()}")
-
 
         # --- ADwrapper ---
         class ADwrapper(torch.autograd.Function):

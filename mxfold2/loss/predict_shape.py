@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .embedding import OneHotEmbedding
+from ..fold.embedding import OneHotEmbedding
 
 class ShapeMLP(nn.Module):
     def __init__(self, hidden_dim=64):

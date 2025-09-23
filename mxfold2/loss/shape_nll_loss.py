@@ -104,14 +104,15 @@ class ShapeNLLLoss(nn.Module):
             logging.error(f"{loss.item()}, {pred.item()}, {ref.item()}")
             logging.error(seq)
 
-        if self.l1_weight > 0.0:
-            for p in self.model.parameters():
-                loss += self.l1_weight * torch.sum(torch.abs(p))
+        # l1, l2を入れるとnanになる（まだ修正できない）
+        # if self.l1_weight > 0.0:
+        #     for p in self.model.parameters():
+        #         loss += self.l1_weight * torch.nansum(torch.abs(p))
 
         # if self.l2_weight > 0.0:
         #     l2_reg = 0.0
         #     for p in self.model.parameters():
-        #         l2_reg += torch.sum((self.l2_weight * p) ** 2)
-        #     loss += torch.sqrt(l2_reg)
+        #         l2_reg += torch.nansum(p ** 2)
+        #     loss += self.l2_weight * l2_reg
 
         return loss

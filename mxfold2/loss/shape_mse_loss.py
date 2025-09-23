@@ -140,9 +140,9 @@ class ShapeMSELoss(nn.Module):
             logging.error(seq)
 
         # --- L1 正則化 ---
-        if self.l1_weight > 0.0:
-            for p in self.model.parameters():
-                loss += self.l1_weight * torch.sum(torch.abs(p))
+        # if self.l1_weight > 0.0:
+        #     for p in self.model.parameters():
+        #         loss += self.l1_weight * torch.sum(torch.abs(p))
 
         # --- L2 正則化 ---
         # if self.l2_weight > 0.0:

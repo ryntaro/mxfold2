@@ -9,7 +9,7 @@ import torch.autograd
 
 from ..fold.fold import AbstractFold
 
-from predict_shape import ShapeMLP   # ← 新しく追加
+from .predict_shape import ShapeMLP   # ← 新しく追加
 
 class ShapeMSELoss(nn.Module):
     def __init__(self, model: AbstractFold,
@@ -65,6 +65,13 @@ class ShapeMSELoss(nn.Module):
             paired.append(p)
         targets = [t.to(pred.device) for t in targets]
 
+        # --- dataset_id の整形 ---
+        if dataset_id is not None:
+            if isinstance(dataset_id, torch.Tensor):
+                dataset_id = int(dataset_id.item())
+            elif isinstance(dataset_id, list):
+                dataset_id = int(dataset_id[0])
+            
         # --- proxyの代わりに ShapeMLP を呼ぶ ---
         mses = self.shape_model[dataset_id](seq, paired, targets)
 

@@ -197,6 +197,6 @@ class Common:
     @classmethod
     def add_task_args(cls, subparser):
         gparser = subparser.add_argument_group("Task setting")
-        gparser.add_argument('--task', choices=('Folding','Assisted_Folding','Multitask'),
+        gparser.add_argument('--task', choices=('Folding','Assisted_Folding','Multitask', 'Implicit_MLE'),
                             default='Folding',
-                            help="Task type: 'Folding', 'Assisted_Folding', or 'Multitask'")
+                            help="Task type: 'Folding', 'Assisted_Folding (only predict)', or 'Multitask', 'Implicit_MLE'")

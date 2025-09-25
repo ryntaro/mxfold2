@@ -21,6 +21,7 @@ from .dataset import BPseqDataset, FastaDataset, MultiTaskDataset
 from .fold.fold import AbstractFold
 from .common import Common
 
+from .loss.predict_shape import ShapeMLP
 
 class Predict(Common):
     def __init__(self):
@@ -78,6 +79,16 @@ class Predict(Common):
                 if task == "Multitask":
                     shp_pred = model.zuker.net.predict_shape(seqs)
                     pred_shapes = shp_pred.float().cpu().numpy()
+
+                elif task == "Implicit_MLE":
+                    paired = []
+                    for bp in bps:  # ← preds ではなく bps を使う
+                        p = [1 if v > 0 else 0 for v in bp]
+                        p = torch.tensor(p, dtype=torch.float32, device=next(model.parameters()).device)
+                        paired.append(p)
+                    loss, metrics = self.shape_model.predict(seqs, paired, vals['shape_target'])
+                    pred_shapes = [None] * len(seqs)
+
                 else:
                     pred_shapes = [None] * len(seqs)
 
@@ -86,7 +97,6 @@ class Predict(Common):
                 for i, (header, seq, sc, pred, bp, pf, bpp, shp) in enumerate(
                                 zip(headers, seqs, scs, preds, bps, pfs, bpps, pred_shapes)):       
                     ref = vals['target'][i]
-
 
                     if output_bpseq is None:# コマンドラインへの出力　
 
@@ -104,7 +114,7 @@ class Predict(Common):
                         for i in range(1, len(bp)):
                             # 4列目にシェイプを書き加える
                             if task == "Multitask" and shp is not None:
-                                print(f'{i}\t{seq[i-1]}\t{bp[i]}\t{shp[i-1]:.3f}')
+                                print(f'{i}\t{seq[i-1]}\t{bp[i]}\t{shp[i-1]:.3f}')                                
                             else:
                                 print(f'{i}\t{seq[i-1]}\t{bp[i]}')
 
@@ -144,6 +154,8 @@ class Predict(Common):
 
                             struct_metrics += [mse, r2, corr]
                             # struct_metrics += [round(mse, 3), round(r2, 3), round(corr, 3)]
+                        elif task == "Implicit_MLE":
+                            struct_metrics += [loss, metrics["R2"], metrics["MAE"]]
 
                         res_fn.write(', '.join([str(v) for v in struct_metrics]) + "\n")
                             
@@ -169,11 +181,12 @@ class Predict(Common):
         # まずFASTAかBPSEQかを判定
         tmp = FastaDataset(args.input)
         is_fasta = len(tmp) > 0
-        if args.task == "Multitask":
-            # Multitask なら必ずBPSEQ+SHAPEが必要
+
+        if args.task in ("Multitask", "Implicit_MLE"):
             if args.shape is None:
-                raise ValueError("Multitask requires --shape (SHAPE file list)")
+                raise ValueError(f"{args.task} requires --shape (SHAPE file list)")
             test_dataset = MultiTaskDataset(bpseq_list=args.input, shape_list=args.shape, dataset_id=0)
+
         elif is_fasta:
             test_dataset = tmp  # FastaDataset
         else:
@@ -196,9 +209,18 @@ class Predict(Common):
             if 'n_averaged' in p:
                 model = AveragedModel(model)
             model.load_state_dict(p)
+        
+            # --- ShapeMLP をロード ---
+            if args.task == "Implicit_MLE":
+                self.shape_model = ShapeMLP()
+                if isinstance(p, dict) and 'shape_model_state_dict' in p:
+                    shape_model.load_state_dict(p['shape_model_state_dict'][0])
 
         if args.gpu >= 0:
             model.to(torch.device("cuda", args.gpu))
+
+            if args.task == "Implicit_MLE":
+                self.shape_model.to(torch.device("cuda", args.gpu))
 
         shape_list = None
         if args.shape is not None: 

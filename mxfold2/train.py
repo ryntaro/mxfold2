@@ -437,11 +437,11 @@ class Train(Common):
         if task == 'Folding':
             # 構造のみ（BPSEQ系データセットだけを使う）
             train_dataset = BPseqDataset(args.input)
-        elif task == 'Assisted_Folding':
+        elif task == 'Implicit_MLE':
             train_dataset = BPseqDataset(args.input)
             # SHAPE拘束つき構造予測（従来の ShapeDataset を追加）
             if not args.shape:
-               raise ValueError("Assisted_Folding には --shape リストが必須です。")
+               raise ValueError("Implicit_MLE には --shape リストが必須です。")
             # ShapeDataset は従来の 'type':'SHAPE' を返すモードで作成
             shape_dataset = [ ShapeDataset(s, i) for i, s in enumerate(args.shape) ]
             train_dataset = ConcatDataset([train_dataset] + shape_dataset)
@@ -615,8 +615,7 @@ class Train(Common):
                             default='WARNING', help="set the log level ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
         subparser.add_argument('--use-amp', action='store_true',
                             help='use automatic mixed precision (AMP) for faster training on GPUs')
-        # subparser.add_argument('--task', choices=('Folding', 'Assisted_Folding', 'Multitask'),
-        #                     default='Folding', help="'Folding', 'Assisted_Folding', 'Multitask'")
+        
         cls.add_task_args(subparser)
         
         cls.add_fold_args(subparser)

@@ -14,7 +14,7 @@ pd.set_option("display.width", None)       # 横幅も制限しない
 df = pd.read_csv(sys.argv[1], names=(
     "name", "length", "elapsed_time", "score",
     "TP", "TN", "FP", "FN", "SEN", "PPV", "F", "MCC",
-    "mse", "r2", "corr"  # Multitask の場合だけ出てくる
+    "mse", "r2", "corr or mae"  # Multitask の場合だけ出てくる
 ))
 
 # 共通で欲しい列

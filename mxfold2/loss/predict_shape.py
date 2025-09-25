@@ -8,9 +8,10 @@ class ShapeMLP(nn.Module):
     def __init__(self, hidden_dim=64):
         super().__init__()
         self.embed = OneHotEmbedding()
-        self.fc1 = nn.Linear(5, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, 1)
+        # self.fc1 = nn.Linear(5, hidden_dim)
+        # self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        # self.fc3 = nn.Linear(hidden_dim, 1)
+        self.fc = nn.Linear(5, 1)
 
     def forward(self, seq: list[str], paired: list[torch.Tensor], targets: list[torch.Tensor]):
         """学習用: MSE loss を返す (autograd 有効)"""
@@ -25,9 +26,10 @@ class ShapeMLP(nn.Module):
             x = x.transpose(1, 2)             # (1,N,4)
             x = torch.cat([x, p.unsqueeze(0).unsqueeze(-1)], dim=-1)  # (1,N,5)
 
-            h = F.relu(self.fc1(x))
-            h = F.relu(self.fc2(h))
-            pred = self.fc3(h).squeeze(0).squeeze(-1)  # (N,)
+            # h = F.relu(self.fc1(x))
+            # h = F.relu(self.fc2(h))
+            # pred = self.fc3(h).squeeze(0).squeeze(-1)  # (N,)
+            pred = self.fc(x).squeeze(0).squeeze(-1)  # (N,)
 
             mask = t >= -1
             if mask.sum() > 0:
@@ -49,9 +51,10 @@ class ShapeMLP(nn.Module):
             x = x.transpose(1, 2)
             x = torch.cat([x, p.unsqueeze(0).unsqueeze(-1)], dim=-1)
 
-            h = F.relu(self.fc1(x))
-            h = F.relu(self.fc2(h))
-            pred = self.fc3(h).squeeze(0).squeeze(-1)
+            # h = F.relu(self.fc1(x))
+            # h = F.relu(self.fc2(h))
+            # pred = self.fc3(h).squeeze(0).squeeze(-1)
+            pred = self.fc(x).squeeze(0).squeeze(-1)  # (N,)
 
             mask = t >= -1
             if mask.sum() > 0:

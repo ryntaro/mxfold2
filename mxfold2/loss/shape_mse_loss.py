@@ -8,8 +8,8 @@ import torch.nn as nn
 import torch.autograd
 
 from ..fold.fold import AbstractFold
+from .predict_shape import ShapeMLP
 
-from .predict_shape import ShapeMLP   # ← 新しく追加
 
 class ShapeMSELoss(nn.Module):
     def __init__(self, model: AbstractFold,
@@ -26,6 +26,7 @@ class ShapeMSELoss(nn.Module):
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
 
+        # unused, kept for compatibility
         self.shape_predictor = ShapeMLP(hidden_dim=64)
 
         if sl_weight > 0.0:
@@ -36,9 +37,6 @@ class ShapeMSELoss(nn.Module):
     def forward(self, seq: list[str], targets: list[torch.Tensor],
                 fname: Optional[list[str]] = None,
                 dataset_id: Optional[list[int]] = None) -> torch.Tensor:
-        pred: torch.Tensor
-        pred_s: list[str]
-        pred_bps: list[list[int]]
         pred, pred_s, pred_bps, param, _ = self.model(
             seq, return_param=True, return_count=True, perturb=self.perturb
         )
@@ -71,17 +69,14 @@ class ShapeMSELoss(nn.Module):
                 dataset_id = int(dataset_id.item())
             elif isinstance(dataset_id, list):
                 dataset_id = int(dataset_id[0])
-            
-        # --- proxyの代わりに ShapeMLP を呼ぶ ---
+
+        # --- ShapeMLP による MSE ---
         mses = self.shape_model[dataset_id](seq, paired, targets)
 
-        # --- 勾配計算 ---
-        mses.backward(retain_graph=True)
-        grads = [p.grad for p in paired]
-        
+        # --- paired に対する勾配を取得 (グラフを壊さない) ---
+        grads = torch.autograd.grad(mses, paired, create_graph=True)
+
         # --- pseudoenergy を付与して再fold ---
-        ref: torch.Tensor
-        ref_s: list[str]
         ref, ref_s, _, param, _ = self.model(
             seq, param=param, return_param=True, return_count=True,
             pseudoenergy=[self.nu * g for g in grads]
@@ -106,15 +101,13 @@ class ShapeMSELoss(nn.Module):
             def backward(ctx, grad_output):
                 return tuple(p - r for p, r in zip(pred_counts, ref_counts))
 
-        loss = ADwrapper.apply(*pred_params)
-        
-        
+        # loss = ADwrapper.apply(*pred_params)
+        loss = mses + ADwrapper.apply(*pred_params)
+
         # --- オプション: Turner 正則化 ---
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         if self.sl_weight > 0.0:
             with torch.no_grad():
-                ref2: torch.Tensor
-                ref2_s: list[str]
                 ref2, ref2_s, _ = self.turner(seq)
             loss += self.sl_weight * (ref - ref2) ** 2 / l
 

@@ -86,7 +86,7 @@ class Predict(Common):
                         p = [1 if v > 0 else 0 for v in bp]
                         p = torch.tensor(p, dtype=torch.float32, device=next(model.parameters()).device)
                         paired.append(p)
-                    loss, metrics = self.shape_model.predict(seqs, paired, vals['shape_target'])
+                    shape_loss, metrics = self.shape_model.predict(seqs, paired, vals['shape_target'])
                     pred_shapes = [None] * len(seqs)
 
                 else:
@@ -155,7 +155,7 @@ class Predict(Common):
                             struct_metrics += [mse, r2, corr]
                             # struct_metrics += [round(mse, 3), round(r2, 3), round(corr, 3)]
                         elif task == "Implicit_MLE":
-                            struct_metrics += [loss, metrics["R2"], metrics["MAE"]]
+                            struct_metrics += [shape_loss, metrics["R2"], metrics["MAE"]]
 
                         res_fn.write(', '.join([str(v) for v in struct_metrics]) + "\n")
                             
@@ -214,7 +214,7 @@ class Predict(Common):
             if args.task == "Implicit_MLE":
                 self.shape_model = ShapeMLP()
                 if isinstance(p, dict) and 'shape_model_state_dict' in p:
-                    shape_model.load_state_dict(p['shape_model_state_dict'][0])
+                    self.shape_model.load_state_dict(p['shape_model_state_dict'][0])
 
         if args.gpu >= 0:
             model.to(torch.device("cuda", args.gpu))

@@ -59,6 +59,7 @@ class ShapeNLLLoss(nn.Module):
             paired.append(p)
         targets = [ t.to(pred.device) for t in targets ]
         nlls = self.shape_model[dataset_id](seq, paired, targets)
+        print(nlls)
         nlls.backward()
         grads = [ p.grad for p in paired ]
 

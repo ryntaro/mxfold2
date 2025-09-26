@@ -101,8 +101,8 @@ class ShapeMSELoss(nn.Module):
             def backward(ctx, grad_output):
                 return tuple(p - r for p, r in zip(pred_counts, ref_counts))
 
-        # loss = ADwrapper.apply(*pred_params)
-        loss = mses + ADwrapper.apply(*pred_params)
+        loss = ADwrapper.apply(*pred_params)
+        # loss = mses + ADwrapper.apply(*pred_params)
 
         # --- オプション: Turner 正則化 ---
         l = torch.tensor([len(s) for s in seq], device=pred.device)

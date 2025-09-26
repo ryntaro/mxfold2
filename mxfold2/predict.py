@@ -22,6 +22,7 @@ from .fold.fold import AbstractFold
 from .common import Common
 
 from .loss.predict_shape import ShapeMLP
+from .shape_model import build_shape_model
 
 class Predict(Common):
     def __init__(self):
@@ -81,12 +82,20 @@ class Predict(Common):
                     pred_shapes = shp_pred.float().cpu().numpy()
 
                 elif task == "Implicit_MLE":
+                    device = next(self.shape_model.parameters()).device
                     paired = []
-                    for bp in bps:  # ← preds ではなく bps を使う
+                    for bp in bps:
                         p = [1 if v > 0 else 0 for v in bp]
-                        p = torch.tensor(p, dtype=torch.float32, device=next(model.parameters()).device)
-                        paired.append(p)
-                    shape_loss, metrics = self.shape_model.predict(seqs, paired, vals['shape_target'])
+                        p = torch.tensor(p, dtype=torch.float32, device=device)
+                        paired.append(p) 
+                    targets = [t.to(device) for t in vals['shape_target']]       # ← GPUに揃える
+
+                    if self.shape_model_name in ("Wu", "Foo"):
+                        nlls = self.shape_model(seqs, paired, targets)
+                        metrics = {"NLL": nlls.mean().item()}
+                    elif self.shape_model_name == "MLP":
+                        _, metrics = self.shape_model.predict(seqs, paired, targets)
+                    
                     pred_shapes = [None] * len(seqs)
 
                 else:
@@ -132,6 +141,19 @@ class Predict(Common):
                                     print(f'{i}\t{seq[i-1]}\t{bp[i]}', file=f)
 
                     if res_fn is not None:
+                        # 最初の1回だけヘッダーを書き込む
+                        if res_fn.tell() == 0:
+                            names = ["name", "length", "elapsed_time", "score",
+                                    "TP", "TN", "FP", "FN", "SEN", "PPV", "F", "MCC"]
+                            if task == "Multitask":
+                                names += ["mse", "r2", "mae"]
+                            elif task == "Implicit_MLE":
+                                if "R2" in metrics:   # MLP
+                                    names += ["mse", "r2", "mae"]
+                                elif "NLL" in metrics:  # Wu/Foo
+                                    names += ["nll"]
+                            res_fn.write(",".join(names) + "\n")   # ✅ ヘッダーはここでだけ書く
+
                         x = compare_bpseq(ref, bp)
                         struct_metrics = [header, len(seq), elapsed_time, sc.item()] + list(x) + list(accuracy(*x))
 
@@ -155,7 +177,11 @@ class Predict(Common):
                             struct_metrics += [mse, r2, corr]
                             # struct_metrics += [round(mse, 3), round(r2, 3), round(corr, 3)]
                         elif task == "Implicit_MLE":
-                            struct_metrics += [shape_loss, metrics["R2"], metrics["MAE"]]
+                            if "R2" in metrics:  # ShapeMLP
+                                struct_metrics += [loss.item(), metrics["R2"], metrics["MAE"]]
+                            elif "NLL" in metrics:  # Wu/Foo
+                                struct_metrics += [metrics["NLL"]]
+
 
                         res_fn.write(', '.join([str(v) for v in struct_metrics]) + "\n")
                             
@@ -210,9 +236,10 @@ class Predict(Common):
                 model = AveragedModel(model)
             model.load_state_dict(p)
         
-            # --- ShapeMLP をロード ---
+            # --- shape model をロード ---
             if args.task == "Implicit_MLE":
-                self.shape_model = ShapeMLP()
+                self.shape_model = build_shape_model(args)
+                self.shape_model_name = args.shape_model  # ← ここで保持
                 if isinstance(p, dict) and 'shape_model_state_dict' in p:
                     self.shape_model.load_state_dict(p['shape_model_state_dict'][0])
 

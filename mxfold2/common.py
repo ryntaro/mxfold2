@@ -200,3 +200,7 @@ class Common:
         gparser.add_argument('--task', choices=('Folding','Assisted_Folding','Multitask', 'Implicit_MLE'),
                             default='Folding',
                             help="Task type: 'Folding', 'Assisted_Folding (only predict)', or 'Multitask', 'Implicit_MLE'")
+
+        gparser.add_argument('--shape-model', choices=('Wu', 'Foo', 'MLP'), default='Wu',
+                            help="shape model nll->Wu, Foo, MSE-> MLP (default: Wu)")
+

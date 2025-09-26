@@ -1,0 +1,15 @@
+from argparse import Namespace
+import torch.nn as nn
+
+def build_shape_model(args: Namespace) -> nn.Module:
+    if args.shape_model == 'Wu':
+        from .fold.shape_layers import Wu
+        return Wu(xi=0.774, mu=0.078, sigma=0.083, alpha=1.006, beta=1.404)
+    elif args.shape_model == 'Foo':
+        from .fold.shape_layers import Foo
+        return Foo(p_alpha=0.540, p_beta=1.390, u_alpha=1.006, u_beta=1.404)
+    elif args.shape_model == 'MLP':
+        from .loss.predict_shape import ShapeMLP
+        return ShapeMLP()
+    else:
+        raise ValueError(f'not implemented: {args.shape_model}')

@@ -29,7 +29,9 @@ class ShapeMLP(nn.Module):
             # h = F.relu(self.fc1(x))
             # h = F.relu(self.fc2(h))
             # pred = self.fc3(h).squeeze(0).squeeze(-1)  # (N,)
-            pred = self.fc(x).squeeze(0).squeeze(-1)  # (N,)
+            # pred = self.fc(x).squeeze(0).squeeze(-1)  # (N,)
+
+            pred = 2*(1-p)
 
             mask = t >= -1
             if mask.sum() > 0:

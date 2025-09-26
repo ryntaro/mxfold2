@@ -29,6 +29,7 @@ from .common import Common
 
 # shape回帰のために導入
 from .fold.layers import NeuralNet, NeuralNet1D 
+from .shape_model import build_shape_model
 
 try:
     from torch.utils.tensorboard.writer import SummaryWriter
@@ -324,18 +325,18 @@ class Train(Common):
             raise(ValueError(f'not implemented: {loss_func}'))
 
 
-    def build_shape_model(self, args: Namespace) -> nn.Module:
-        if args.shape_model == 'Wu':
-            from .fold.shape_layers import Wu
-            return Wu(xi=0.774, mu=0.078, sigma=0.083, alpha=1.006, beta=1.404)
-        elif args.shape_model == 'Foo':
-            from .fold.shape_layers import Foo
-            return Foo(p_alpha=0.540, p_beta=1.390, u_alpha=1.006, u_beta=1.404)
-        elif args.shape_model == 'MLP':
-            from .loss.predict_shape import ShapeMLP
-            return ShapeMLP()
-        else:
-            raise(ValueError(f'not implemented: {args.shape_model}'))
+    # def build_shape_model(self, args: Namespace) -> nn.Module:
+    #     if args.shape_model == 'Wu':
+    #         from .fold.shape_layers import Wu
+    #         return Wu(xi=0.774, mu=0.078, sigma=0.083, alpha=1.006, beta=1.404)
+    #     elif args.shape_model == 'Foo':
+    #         from .fold.shape_layers import Foo
+    #         return Foo(p_alpha=0.540, p_beta=1.390, u_alpha=1.006, u_beta=1.404)
+    #     elif args.shape_model == 'MLP':
+    #         from .loss.predict_shape import ShapeMLP
+    #         return ShapeMLP()
+    #     else:
+    #         raise(ValueError(f'not implemented: {args.shape_model}'))
 
 
     def build_shape_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace,
@@ -482,8 +483,8 @@ class Train(Common):
         config.update({ 'model': args.model, 'param': args.param, 'fold': args.fold })
 
         shape_model = None 
-        if args.shape is not None:
-            shape_model = [ self.build_shape_model(args) for _ in args.shape ]
+        if args.task == "Implicit_MLE":
+            shape_model = [ build_shape_model(args) for _ in args.shape ]
         
         if args.init_param != '':
             init_param = Path(args.init_param)
@@ -662,8 +663,8 @@ class Train(Common):
                             help='the penalty for positive unpaired bases for loss augmentation (default: 0)')
         gparser.add_argument('--loss-neg-unpaired', type=float, default=0.,
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
-        gparser.add_argument('--shape-model', choices=('Wu', 'Foo', 'MLP'), default='Wu',
-                            help="shape model nll->Wu, Foo, MSE-> MLP (default: Wu)")
+        # gparser.add_argument('--shape-model', choices=('Wu', 'Foo', 'MLP'), default='Wu',
+        #                     help="shape model nll->Wu, Foo, MSE-> MLP (default: Wu)")
         gparser.add_argument('--shape-loss-func', choices=('shape_nll', 'shape_fy', 'shape_mse'), default='shape_nll',
                             help="loss fuction for SHAPE training data (default: shape)")
         gparser.add_argument('--shape-perturb', type=float, default=0.1,

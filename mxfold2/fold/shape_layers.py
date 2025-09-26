@@ -50,6 +50,11 @@ class Wu(nn.Module):
         self.alpha.data.clamp_(min=1e-2)
         self.beta.data.clamp_(min=1e-2)
         logging.debug(f'xi={self.xi}, mu={self.mu}, sigma={self.sigma}, alpha={self.alpha}, beta={self.beta}')
+        # 主要なパラメータのデバイスを確認
+        # print(f"[Wu] xi.device={self.xi.device}, mu.device={self.mu.device}, sigma.device={self.sigma.device}")
+        # print(f"[Wu] alpha.device={self.alpha.device}, beta.device={self.beta.device}")
+        # print(f"[Wu] paired[0].device={paired[0].device}, targets[0].device={targets[0].device}")
+
         nlls = []
         for i in range(len(seq)):
             valid = targets[i] > -1 # to ignore missing values (-999)

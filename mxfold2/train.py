@@ -121,6 +121,22 @@ class Train(Common):
                     else:
                         optimizer.step()
 
+                    # --- パラメータ制約（Wu など shape_model 用） ---
+                    with torch.no_grad():
+                        if hasattr(loss_fn, "shape_model") and loss_fn.shape_model is not None:
+                            for sm in loss_fn.shape_model:
+                                if hasattr(sm, "xi"):
+                                    sm.xi.clamp_(min=-2.0, max=2.0)
+                                if hasattr(sm, "mu"):
+                                    sm.mu.clamp_(min=0.0, max=2.0)
+                                if hasattr(sm, "sigma"):
+                                    sm.sigma.clamp_(min=1e-2, max=2.0)
+                                if hasattr(sm, "alpha"):
+                                    sm.alpha.clamp_(min=1e-2, max=5.0)
+                                if hasattr(sm, "beta"):
+                                    sm.beta.clamp_(min=1e-2, max=5.0)
+
+
                 num += n_batch
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
                 pbar.update(n_batch)

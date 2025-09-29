@@ -46,18 +46,26 @@ class Wu(nn.Module):
 
     def forward(self, seq: list[str], paired: list[torch.tensor], targets: list[torch.Tensor]):
 
-        self.xi.data.clamp_(min=1e-2)
-        self.sigma.data.clamp_(min=1e-2)
-        self.alpha.data.clamp_(min=1e-2)
-        self.beta.data.clamp_(min=1e-2)
+        # self.xi.data.clamp_(min=1e-2)
+        # self.sigma.data.clamp_(min=1e-2)
+        # self.alpha.data.clamp_(min=1e-2)
+        # self.beta.data.clamp_(min=1e-2)
         
         nlls = []
         for i in range(len(seq)):
-            valid = targets[i] > -1 # to ignore missing values (-999)
+            # valid = targets[i] > -1 # to ignore missing values (-999)
+            valid = targets[i] > 0 # to ignore missing values (-999)
             t = targets[i][valid].clip(min=1e-2, max=3.)
             p = paired[i][valid]
-            nll = -torch.mean(self.paired_dist.log_prob(t) * p 
-                            + self.unpaired_dist.log_prob(t) * (1-p))
+
+            # nll = -torch.mean(self.paired_dist.log_prob(t) * p 
+            #                 + self.unpaired_dist.log_prob(t) * (1-p))
+            nll1 = self.paired_dist.log_prob(t) * p
+            print('nll1', nll1)
+            nll2 =self.unpaired_dist.log_prob(t) * (1-p)
+            print('nll2', nll2)
+            nll = -torch.mean(nll1 + nll2)
+            
             nlls.append(nll)
         
         # --- 配列単位で NaN チェック ---
@@ -87,10 +95,10 @@ class Foo(nn.Module):
 
 
     def forward(self, seq: list[str], paired: list[torch.tensor], targets: list[torch.Tensor]):
-        self.p_alpha.data.clamp_(min=1e-2)
-        self.p_beta.data.clamp_(min=1e-2)
-        self.u_alpha.data.clamp_(min=1e-2)
-        self.u_beta.data.clamp_(min=1e-2)
+        # self.p_alpha.data.clamp_(min=1e-2)
+        # self.p_beta.data.clamp_(min=1e-2)
+        # self.u_alpha.data.clamp_(min=1e-2)
+        # self.u_beta.data.clamp_(min=1e-2)
         nlls = []
         for i in range(len(seq)):
             valid = targets[i] > -1 # to ignore missing values (-999)

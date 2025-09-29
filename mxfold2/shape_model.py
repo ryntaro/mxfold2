@@ -4,10 +4,10 @@ import torch.nn as nn
 def build_shape_model(args: Namespace) -> nn.Module:
     if args.shape_model == 'Wu':
         from .fold.shape_layers import Wu
-        # return Wu(xi=0.774, mu=0.078, sigma=0.083, alpha=1.006, beta=1.404)
+        return Wu(xi=0.774, mu=0.078, sigma=0.083, alpha=1.006, beta=1.404)
         
         # error をおこすparameter
-        return Wu(xi=2.8856, mu=0.0135, sigma=0.0100, alpha=0.7617, beta=1.3015)
+        # return Wu(xi=2.8856, mu=0.0135, sigma=0.0100, alpha=0.7617, beta=1.3015)
 
     elif args.shape_model == 'Foo':
         from .fold.shape_layers import Foo

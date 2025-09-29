@@ -126,7 +126,7 @@ class Train(Common):
                         if hasattr(loss_fn, "shape_model") and loss_fn.shape_model is not None:
                             for sm in loss_fn.shape_model:
                                 if hasattr(sm, "xi"):
-                                    sm.xi.clamp_(min=-2.0, max=2.0)
+                                    sm.xi.clamp_(min=1e-2, max=2.0)
                                 if hasattr(sm, "mu"):
                                     sm.mu.clamp_(min=0.0, max=2.0)
                                 if hasattr(sm, "sigma"):
@@ -135,7 +135,6 @@ class Train(Common):
                                     sm.alpha.clamp_(min=1e-2, max=5.0)
                                 if hasattr(sm, "beta"):
                                     sm.beta.clamp_(min=1e-2, max=5.0)
-
 
                 num += n_batch
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
@@ -363,7 +362,7 @@ class Train(Common):
                             shape_model=shape_model,
                             perturb=args.shape_perturb, nu=args.shape_nu, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight,
-                            sl_weight=0.)
+                            sl_weight=args.score_loss_weight)
 
         elif loss_func == 'shape_fy':
             from .loss.shape_fy_loss import ShapeFenchelYoungLoss
@@ -379,7 +378,7 @@ class Train(Common):
                             shape_model=shape_model,
                             perturb=args.shape_perturb, nu=args.shape_nu, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight,
-                            sl_weight=0.)
+                            sl_weight=args.score_loss_weight)
 
         else:
             raise(ValueError(f'not implemented: {loss_func}'))

@@ -58,13 +58,13 @@ class Wu(nn.Module):
             t = targets[i][valid].clip(min=1e-2, max=3.)
             p = paired[i][valid]
 
-            # nll = -torch.mean(self.paired_dist.log_prob(t) * p 
-            #                 + self.unpaired_dist.log_prob(t) * (1-p))
-            nll1 = self.paired_dist.log_prob(t) * p
-            print('nll1', nll1)
-            nll2 =self.unpaired_dist.log_prob(t) * (1-p)
-            print('nll2', nll2)
-            nll = -torch.mean(nll1 + nll2)
+            nll = -torch.mean(self.paired_dist.log_prob(t) * p 
+                            + self.unpaired_dist.log_prob(t) * (1-p))
+            # nll1 = self.paired_dist.log_prob(t) * p
+            # print('nll1', nll1)
+            # nll2 =self.unpaired_dist.log_prob(t) * (1-p)
+            # print('nll2', nll2)
+            # nll = -torch.mean(nll1 + nll2)
             
             nlls.append(nll)
         

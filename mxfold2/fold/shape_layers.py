@@ -45,16 +45,12 @@ class Wu(nn.Module):
 
 
     def forward(self, seq: list[str], paired: list[torch.tensor], targets: list[torch.Tensor]):
+
         self.xi.data.clamp_(min=1e-2)
         self.sigma.data.clamp_(min=1e-2)
         self.alpha.data.clamp_(min=1e-2)
         self.beta.data.clamp_(min=1e-2)
-        logging.debug(f'xi={self.xi}, mu={self.mu}, sigma={self.sigma}, alpha={self.alpha}, beta={self.beta}')
-        # 主要なパラメータのデバイスを確認
-        # print(f"[Wu] xi.device={self.xi.device}, mu.device={self.mu.device}, sigma.device={self.sigma.device}")
-        # print(f"[Wu] alpha.device={self.alpha.device}, beta.device={self.beta.device}")
-        # print(f"[Wu] paired[0].device={paired[0].device}, targets[0].device={targets[0].device}")
-
+        
         nlls = []
         for i in range(len(seq)):
             valid = targets[i] > -1 # to ignore missing values (-999)
@@ -63,6 +59,14 @@ class Wu(nn.Module):
             nll = -torch.mean(self.paired_dist.log_prob(t) * p 
                             + self.unpaired_dist.log_prob(t) * (1-p))
             nlls.append(nll)
+        
+        # --- 配列単位で NaN チェック ---
+        if torch.isnan(torch.stack(nlls)).any():
+            logging.error("[NaN detected in batch]")
+            logging.error(f"xi={self.xi.item():.4f}, mu={self.mu.item():.4f}, "
+                            f"sigma={self.sigma.item():.4f}, alpha={self.alpha.item():.4f}, beta={self.beta.item():.4f}")
+            # logging.error(f"nlls={nlls.detach().cpu().numpy()}")
+
         return torch.stack(nlls)
 
 

@@ -33,7 +33,8 @@ class ShapeNLLLoss(nn.Module):
 
     def forward(self, seq: list[str], targets: list[torch.Tensor],
                 fname: Optional[list[str]] = None,
-                dataset_id: Optional[list[int]] = None) -> torch.Tensor:
+                dataset_id: Optional[int] = None) -> torch.Tensor:
+        
         pred: torch.Tensor
         pred_s: list[str]
         pred_bps: list[list[int]]

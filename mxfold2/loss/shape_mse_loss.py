@@ -64,11 +64,11 @@ class ShapeMSELoss(nn.Module):
         targets = [t.to(pred.device) for t in targets]
 
         # --- dataset_id の整形 ---
-        if dataset_id is not None:
-            if isinstance(dataset_id, torch.Tensor):
-                dataset_id = int(dataset_id.item())
-            elif isinstance(dataset_id, list):
-                dataset_id = int(dataset_id[0])
+        # if dataset_id is not None:
+        #     if isinstance(dataset_id, torch.Tensor):
+        #         dataset_id = int(dataset_id.item())
+        #     elif isinstance(dataset_id, list):
+        #         dataset_id = int(dataset_id[0])
 
         # --- ShapeMLP による MSE ---
         mses = self.shape_model[dataset_id](seq, paired, targets)

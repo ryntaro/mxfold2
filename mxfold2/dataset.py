@@ -72,7 +72,7 @@ class BPseqDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
                     p.append(pair)
         
         seq = ''.join(s)
-        return (filename, seq, {'type': 'BPSEQ', 'target': torch.tensor(p), 'dataset_id': dataset_id})
+        return (filename, seq, {'type': 'BPSEQ', 'target': torch.tensor(p), 'dataset_id': int(dataset_id)})
 
 class ShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
     def __init__(self, shape_list: str, dataset_id: int) -> None:
@@ -108,7 +108,7 @@ class ShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
                     m.append(1 if reactivity != -999 else 0.0)
         
         seq = ''.join(s)
-        return (filename, seq, {'type': 'SHAPE', 'target': torch.tensor(p), 'mask':torch.tensor(m), 'dataset_id': dataset_id})
+        return (filename, seq, {'type': 'SHAPE', 'target': torch.tensor(p), 'mask':torch.tensor(m), 'dataset_id': int(dataset_id)})
 
 class MultiTaskDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
     """
@@ -172,5 +172,5 @@ class MultiTaskDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
         return (filename, seq, {
             'target': d['target'],
             'mask':   d['mask'],
-            'dataset_id': dataset_id,
+            'dataset_id': int(dataset_id),
         })

@@ -68,7 +68,7 @@ class Train(Common):
                 n_batch = len(seqs)
                 for i in range(n_batch):
                     optimizer.zero_grad()
-                    
+                                        
                     # Use autocast for mixed precision if enabled
                     with autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
                         if vals['type'][i]=='BPSEQ':
@@ -324,7 +324,7 @@ class Train(Common):
         else:
             raise(ValueError(f'not implemented: {loss_func}'))
 
-
+    # shape_model.pyに分離させた
     # def build_shape_model(self, args: Namespace) -> nn.Module:
     #     if args.shape_model == 'Wu':
     #         from .fold.shape_layers import Wu

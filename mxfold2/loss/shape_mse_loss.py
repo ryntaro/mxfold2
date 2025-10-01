@@ -119,6 +119,7 @@ class ShapeMSELoss(nn.Module):
         #     for p in self.model.parameters():
         #         loss += self.l1_weight * torch.sum(torch.abs(p))
 
+        # optimizerのweight decayでl2正則はできてる
         # --- L2 正則化 ---
         # if self.l2_weight > 0.0:
         #     l2_reg = 0.0

@@ -89,6 +89,14 @@ class Train(Common):
                         else:
                             raise(RuntimeError('not implemented'))
 
+                        # --- DEBUG: forward 直後のメモリ ---
+                        # if torch.cuda.is_available():
+                        #     print(f"[Epoch {epoch} Iter {self.step}] "
+                        #         f"AFTER FORWARD: alloc={torch.cuda.memory_allocated()/1e6:.1f}MB, "
+                        #         f"resv={torch.cuda.memory_reserved()/1e6:.1f}MB, "
+                        #         f"peak={torch.cuda.max_memory_allocated()/1e6:.1f}MB")
+                        #     torch.cuda.reset_peak_memory_stats()
+
                         # if torch.isnan(loss) or torch.isinf(loss):
                         #     logging.warning(f"Skip NaN sample: {fnames[i]}")
                         #     continue
@@ -104,6 +112,13 @@ class Train(Common):
                         scaler.scale(loss).backward()
                     else:
                         loss.backward()
+
+                    # if torch.cuda.is_available():
+                    #     print(f"[Epoch {epoch} Iter {self.step}] "
+                    #         f"AFTER BACKWARD: alloc={torch.cuda.memory_allocated()/1e6:.1f}MB, "
+                    #         f"resv={torch.cuda.memory_reserved()/1e6:.1f}MB, "
+                    #         f"peak={torch.cuda.max_memory_allocated()/1e6:.1f}MB")
+                    #     torch.cuda.reset_peak_memory_stats()
 
                     # Gradient clipping with unscaling if using mixed precision
                     if scaler is not None:
@@ -135,6 +150,13 @@ class Train(Common):
                                     sm.alpha.clamp_(min=1e-2, max=5.0)
                                 if hasattr(sm, "beta"):
                                     sm.beta.clamp_(min=1e-2, max=5.0)
+                    
+                    # if torch.cuda.is_available():
+                    #     print(f"[Epoch {epoch} Iter {self.step}] "
+                    #         f"END OF ITER: alloc={torch.cuda.memory_allocated()/1e6:.1f}MB, "
+                    #         f"resv={torch.cuda.memory_reserved()/1e6:.1f}MB, "
+                    #         f"peak={torch.cuda.max_memory_allocated()/1e6:.1f}MB")
+                    #     torch.cuda.reset_peak_memory_stats()
 
                 num += n_batch
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))

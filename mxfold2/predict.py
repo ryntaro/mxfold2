@@ -149,7 +149,7 @@ class Predict(Common):
                                 names += ["mse", "r2", "mae"]
                             elif task == "Implicit_MLE":
                                 if "R2" in metrics:   # MLP
-                                    names += ["mse", "r2", "mae"]
+                                    names += ["r2", "mae"]
                                 elif "NLL" in metrics:  # Wu/Foo
                                     names += ["nll"]
                             res_fn.write(",".join(names) + "\n")   # ✅ ヘッダーはここでだけ書く
@@ -178,7 +178,7 @@ class Predict(Common):
                             # struct_metrics += [round(mse, 3), round(r2, 3), round(corr, 3)]
                         elif task == "Implicit_MLE":
                             if "R2" in metrics:  # ShapeMLP
-                                struct_metrics += [loss.item(), metrics["R2"], metrics["MAE"]]
+                                struct_metrics += [metrics["R2"], metrics["MAE"]]
                             elif "NLL" in metrics:  # Wu/Foo
                                 struct_metrics += [metrics["NLL"]]
 

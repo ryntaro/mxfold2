@@ -199,7 +199,7 @@ class Common:
         gparser = subparser.add_argument_group("Task setting")
         gparser.add_argument('--task', choices=('Folding','Assisted_Folding','Multitask', 'Implicit_MLE'),
                             default='Folding',
-                            help="Task type: 'Folding', 'Assisted_Folding (only predict)', or 'Multitask', 'Implicit_MLE'")
+                            help="Task type: 'Folding', 'Assisted_Folding (only predict)', or 'Multitask', 'Implicit_MLE' Multitask->input,--shapeが同じRNA, Implicit_MLE->違うRNA")
 
         gparser.add_argument('--shape-model', choices=('Wu', 'Foo', 'MLP'), default='Wu',
                             help="shape model nll->Wu, Foo, MSE-> MLP (default: Wu)")

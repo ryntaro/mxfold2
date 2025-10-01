@@ -60,7 +60,6 @@ class ShapeNLLLoss(nn.Module):
             paired.append(p)
         targets = [ t.to(pred.device) for t in targets ]
         nlls = self.shape_model[dataset_id](seq, paired, targets)
-        # print(nlls)
         nlls.backward()
         grads = [ p.grad for p in paired ]
 
@@ -81,7 +80,10 @@ class ShapeNLLLoss(nn.Module):
         class ADwrapper(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *input):
-                return nlls
+                # return nlls
+        
+                # nlls.detach() の値だけ返す（グラフは切る）
+                return nlls.detach()
 
             @staticmethod
             def backward(ctx, grad_output):
@@ -111,6 +113,7 @@ class ShapeNLLLoss(nn.Module):
         #     for p in self.model.parameters():
         #         loss += self.l1_weight * torch.nansum(torch.abs(p))
 
+        # optimizerのweight decayでl2正則はできてる
         # if self.l2_weight > 0.0:
         #     l2_reg = 0.0
         #     for p in self.model.parameters():

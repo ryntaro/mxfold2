@@ -151,12 +151,12 @@ class Train(Common):
                                 if hasattr(sm, "beta"):
                                     sm.beta.clamp_(min=1e-2, max=5.0)
                     
-                    # if torch.cuda.is_available():
-                    #     print(f"[Epoch {epoch} Iter {self.step}] "
-                    #         f"END OF ITER: alloc={torch.cuda.memory_allocated()/1e6:.1f}MB, "
-                    #         f"resv={torch.cuda.memory_reserved()/1e6:.1f}MB, "
-                    #         f"peak={torch.cuda.max_memory_allocated()/1e6:.1f}MB")
-                    #     torch.cuda.reset_peak_memory_stats()
+                    if torch.cuda.is_available():
+                        print(f"[Epoch {epoch} Iter {self.step}] "
+                            f"END OF ITER: alloc={torch.cuda.memory_allocated()/1e6:.1f}MB, "
+                            f"resv={torch.cuda.memory_reserved()/1e6:.1f}MB, "
+                            f"peak={torch.cuda.max_memory_allocated()/1e6:.1f}MB")
+                        torch.cuda.reset_peak_memory_stats()
 
                 num += n_batch
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))

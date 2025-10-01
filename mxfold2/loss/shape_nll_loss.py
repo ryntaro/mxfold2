@@ -59,9 +59,20 @@ class ShapeNLLLoss(nn.Module):
             p = torch.tensor(p, dtype=torch.float32, requires_grad=True, device=pred.device)
             paired.append(p)
         targets = [ t.to(pred.device) for t in targets ]
+        
         nlls = self.shape_model[dataset_id](seq, paired, targets)
-        nlls.backward()
-        grads = [ p.grad for p in paired ]
+        # nlls.backward()
+        # grads = [ p.grad for p in paired ]
+
+        nll  = torch.sum(nlls)                                      # scalar
+        # 2) 必要な勾配だけを抽出（グラフを保持・累積しない）
+        grads = torch.autograd.grad(
+            nll,                        # outputs
+            paired,                     # inputs to take grad wrt
+            create_graph=False,         # 二階微分は不要
+            retain_graph=False,         # グラフは消費してよい
+            allow_unused=False
+        )
 
         ref: torch.Tensor
         ref_s: list[str]
@@ -83,7 +94,8 @@ class ShapeNLLLoss(nn.Module):
                 # return nlls
         
                 # nlls.detach() の値だけ返す（グラフは切る）
-                return nlls.detach()
+                # return nlls.detach()
+                return nll.detach().clone().reshape(())   # 0-dim & 非view
 
             @staticmethod
             def backward(ctx, grad_output):
@@ -97,7 +109,12 @@ class ShapeNLLLoss(nn.Module):
                 ref2: torch.Tensor
                 ref2_s: list[str]
                 ref2, ref2_s, _ = self.turner(seq)
-            loss += self.sl_weight * (ref-ref2)**2 / l
+            
+            print('loss', loss)
+            print('ref', ref)
+            print('ref2', ref2)
+            # loss += self.sl_weight * (ref-ref2)**2 / l
+            loss = loss + self.sl_weight * ((ref - ref2) ** 2).sum() / l
 
         logging.debug(f"Loss = {loss.item()} = ({pred.item()} - {ref.item()})")
         logging.debug(seq)

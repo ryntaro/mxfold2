@@ -61,18 +61,21 @@ class ShapeNLLLoss(nn.Module):
         targets = [ t.to(pred.device) for t in targets ]
         
         nlls = self.shape_model[dataset_id](seq, paired, targets)
-        # nlls.backward()
-        # grads = [ p.grad for p in paired ]
+        nlls.backward()
+        grads = [ p.grad for p in paired ]
 
-        nll  = torch.sum(nlls)                                      # scalar
-        # 2) 必要な勾配だけを抽出（グラフを保持・累積しない）
-        grads = torch.autograd.grad(
-            nll,                        # outputs
-            paired,                     # inputs to take grad wrt
-            create_graph=False,         # 二階微分は不要
-            retain_graph=False,         # グラフは消費してよい
-            allow_unused=False
-        )
+        # nll  = torch.sum(nlls)                                      # scalar
+        # # 2) 必要な勾配だけを抽出（グラフを保持・累積しない）
+        # grads = torch.autograd.grad(
+        #     nll,                        # outputs
+        #     paired,                     # inputs to take grad wrt
+        #     create_graph=False,         # 二階微分は不要
+        #     retain_graph=False,         # グラフは消費してよい
+        #     allow_unused=False
+        # )
+
+        # grads = torch.autograd.grad(nlls.sum(), paired,
+        #                     create_graph=False, retain_graph=False)
 
         ref: torch.Tensor
         ref_s: list[str]
@@ -91,17 +94,24 @@ class ShapeNLLLoss(nn.Module):
         class ADwrapper(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *input):
-                # return nlls
+                return nlls
         
                 # nlls.detach() の値だけ返す（グラフは切る）
                 # return nlls.detach()
-                return nll.detach().clone().reshape(())   # 0-dim & 非view
+                # return nll.detach().clone().reshape(())   # 0-dim & 非view
 
             @staticmethod
             def backward(ctx, grad_output):
                 return tuple( p-r for p, r in zip(pred_counts, ref_counts) )
 
         loss = ADwrapper.apply(*pred_params)
+
+        # surrogate loss を構築
+        # terms = []
+        # for p, pc, rc in zip(pred_params, pred_counts, ref_counts):
+        #     coeff = (pc - rc).detach()    # 勾配を流さない
+        #     terms.append((p * coeff).sum())
+        # loss = torch.stack(terms).sum()
 
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         if self.sl_weight > 0.0:
@@ -110,9 +120,6 @@ class ShapeNLLLoss(nn.Module):
                 ref2_s: list[str]
                 ref2, ref2_s, _ = self.turner(seq)
             
-            print('loss', loss)
-            print('ref', ref)
-            print('ref2', ref2)
             # loss += self.sl_weight * (ref-ref2)**2 / l
             loss = loss + self.sl_weight * ((ref - ref2) ** 2).sum() / l
 

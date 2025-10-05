@@ -61,21 +61,16 @@ class ShapeNLLLoss(nn.Module):
         targets = [ t.to(pred.device) for t in targets ]
         
         nlls = self.shape_model[dataset_id](seq, paired, targets)
-        nlls.backward()
-        grads = [ p.grad for p in paired ]
+        # nlls.backward()
+        # grads = [ p.grad for p in paired ]
 
-        # nll  = torch.sum(nlls)                                      # scalar
-        # # 2) 必要な勾配だけを抽出（グラフを保持・累積しない）
-        # grads = torch.autograd.grad(
-        #     nll,                        # outputs
-        #     paired,                     # inputs to take grad wrt
-        #     create_graph=False,         # 二階微分は不要
-        #     retain_graph=False,         # グラフは消費してよい
-        #     allow_unused=False
-        # )
-
-        # grads = torch.autograd.grad(nlls.sum(), paired,
-        #                     create_graph=False, retain_graph=False)
+        # nlls の勾配を計算し、勾配テンソルだけを detach して保持する
+        nlls_sum = nlls.sum()
+        nlls_sum.backward()  # create_graph=False, retain_graph=False（デフォルト）でグラフを消費
+        grads = [ (p.grad.detach().clone() if p.grad is not None else torch.zeros_like(p)) for p in paired ]
+        # 不要な参照を切る
+        for p in paired:
+            p.grad = None
 
         ref: torch.Tensor
         ref_s: list[str]
@@ -91,27 +86,63 @@ class ShapeNLLLoss(nn.Module):
                     if kk.startswith('count_'):
                         ref_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
 
+        # class ADwrapper(torch.autograd.Function):
+        #     @staticmethod
+        #     def forward(ctx, *input):
+        #         # return nlls
+        
+        #         # nlls.detach() の値だけ返す（グラフは切る）
+        #         return nlls.detach()
+        #         # return nll.detach().clone().reshape(())   # 0-dim & 非view
+
+        #     @staticmethod
+        #     def backward(ctx, grad_output):
+        #         return tuple( p-r for p, r in zip(pred_counts, ref_counts) )
+
+        # loss = ADwrapper.apply(*pred_params)
+
+        # --- 変更点: pred_counts/ref_counts の差を detach して保持し、
+        #              nlls は detach して ADwrapper に渡す ---
+        # diffs をローカルで作り、apply に渡して外側で参照を残さない
+        diffs = [ (pc - rc).detach().clone() for pc, rc in zip(pred_counts, ref_counts) ]
+        detached_nlls = nlls.detach().clone()
+
         class ADwrapper(torch.autograd.Function):
             @staticmethod
-            def forward(ctx, *input):
-                return nlls
-        
-                # nlls.detach() の値だけ返す（グラフは切る）
-                # return nlls.detach()
-                # return nll.detach().clone().reshape(())   # 0-dim & 非view
+            def forward(ctx, detached_nlls_tensor, *inputs):
+                # inputs = pred_params  + diffs
+                n_inputs = len(inputs)
+                # pred_params と diffs は同数で渡す想定
+                n_pred = n_inputs // 2
+                ctx.n_pred = n_pred
+                # diffs を saved_tensors として保存（autograd が適切に解放する）
+                diffs_to_save = inputs[n_pred:]
+                ctx.save_for_backward(*diffs_to_save)
+                return detached_nlls_tensor
 
             @staticmethod
             def backward(ctx, grad_output):
-                return tuple( p-r for p, r in zip(pred_counts, ref_counts) )
+                saved = ctx.saved_tensors  # diffs
+                n_pred = ctx.n_pred
 
-        loss = ADwrapper.apply(*pred_params)
+                grads_for_pred = []
+                for d in saved:
+                    if grad_output.dim() == 0:
+                        g = d * grad_output
+                    else:
+                        shape = [grad_output.shape[0]] + [1] * (d.dim() - 1)
+                        g = d * grad_output.view(*shape)
+                    grads_for_pred.append(g)
 
-        # surrogate loss を構築
-        # terms = []
-        # for p, pc, rc in zip(pred_params, pred_counts, ref_counts):
-        #     coeff = (pc - rc).detach()    # 勾配を流さない
-        #     terms.append((p * coeff).sum())
-        # loss = torch.stack(terms).sum()
+                # 戻り値の長さ: (detached_nlls_grad) + pred_params_grads + diffs_grads
+                # detached_nlls は None、diffs 自体には勾配を返さない => None
+                return (None, ) + tuple(grads_for_pred) + tuple([None] * n_pred)
+
+        # ADwrapper に pred_params と diffs を続けて渡す（外側の diffs 参照はここで切る）
+        loss = ADwrapper.apply(detached_nlls, *pred_params, *diffs)
+        # 参照を切る
+        diffs = None
+        detached_nlls = None
 
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         if self.sl_weight > 0.0:
@@ -120,8 +151,8 @@ class ShapeNLLLoss(nn.Module):
                 ref2_s: list[str]
                 ref2, ref2_s, _ = self.turner(seq)
             
-            # loss += self.sl_weight * (ref-ref2)**2 / l
-            loss = loss + self.sl_weight * ((ref - ref2) ** 2).sum() / l
+            loss += self.sl_weight * (ref-ref2)**2 / l
+            # loss = loss + self.sl_weight * ((ref - ref2) ** 2).sum() / l
 
         logging.debug(f"Loss = {loss.item()} = ({pred.item()} - {ref.item()})")
         logging.debug(seq)

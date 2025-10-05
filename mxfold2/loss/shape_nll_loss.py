@@ -151,8 +151,8 @@ class ShapeNLLLoss(nn.Module):
                 ref2_s: list[str]
                 ref2, ref2_s, _ = self.turner(seq)
             
-            loss += self.sl_weight * (ref-ref2)**2 / l
-            # loss = loss + self.sl_weight * ((ref - ref2) ** 2).sum() / l
+            # loss += self.sl_weight * (ref-ref2)**2 / l
+            loss = loss + self.sl_weight * ((ref - ref2) ** 2).sum() / l
 
         logging.debug(f"Loss = {loss.item()} = ({pred.item()} - {ref.item()})")
         logging.debug(seq)

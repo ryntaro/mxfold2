@@ -89,14 +89,6 @@ class Train(Common):
                         else:
                             raise(RuntimeError('not implemented'))
 
-                        # --- DEBUG: forward 直後のメモリ ---
-                        # if torch.cuda.is_available():
-                        #     print(f"[Epoch {epoch} Iter {self.step}] "
-                        #         f"AFTER FORWARD: alloc={torch.cuda.memory_allocated()/1e6:.1f}MB, "
-                        #         f"resv={torch.cuda.memory_reserved()/1e6:.1f}MB, "
-                        #         f"peak={torch.cuda.max_memory_allocated()/1e6:.1f}MB")
-                        #     torch.cuda.reset_peak_memory_stats()
-
                         # if torch.isnan(loss) or torch.isinf(loss):
                         #     logging.warning(f"Skip NaN sample: {fnames[i]}")
                         #     continue
@@ -112,13 +104,6 @@ class Train(Common):
                         scaler.scale(loss).backward()
                     else:
                         loss.backward()
-
-                    # if torch.cuda.is_available():
-                    #     print(f"[Epoch {epoch} Iter {self.step}] "
-                    #         f"AFTER BACKWARD: alloc={torch.cuda.memory_allocated()/1e6:.1f}MB, "
-                    #         f"resv={torch.cuda.memory_reserved()/1e6:.1f}MB, "
-                    #         f"peak={torch.cuda.max_memory_allocated()/1e6:.1f}MB")
-                    #     torch.cuda.reset_peak_memory_stats()
 
                     # Gradient clipping with unscaling if using mixed precision
                     if scaler is not None:
@@ -151,12 +136,15 @@ class Train(Common):
                                 if hasattr(sm, "beta"):
                                     sm.beta.clamp_(min=1e-2, max=5.0)
                     
+                    # バッチ単位の情報は標準出力へ出す（ジョブの .o に流れる）。
+                    # loss.log にはエポック単位で一行だけ書くため、ここではファイル追記しない。
                     if torch.cuda.is_available():
-                        print(f"[Epoch {epoch} Iter {self.step}] "
-                            f"END OF ITER: alloc={torch.cuda.memory_allocated()/1e6:.1f}MB, "
-                            f"resv={torch.cuda.memory_reserved()/1e6:.1f}MB, "
-                            f"peak={torch.cuda.max_memory_allocated()/1e6:.1f}MB")
-                        torch.cuda.reset_peak_memory_stats()
+                        alloc = torch.cuda.memory_allocated() / 1e6
+                        resv = torch.cuda.memory_reserved() / 1e6
+                        peak = torch.cuda.max_memory_allocated() / 1e6
+                        print(f"[Epoch {epoch} Step {self.step}] iter={i} loss={loss.item():.6e} alloc={alloc:.1f}MB resv={resv:.1f}MB peak={peak:.1f}MB")
+                    else:
+                        print(f"[Epoch {epoch} Step {self.step}] iter={i} loss={loss.item():.6e}")
 
                 num += n_batch
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
@@ -175,9 +163,16 @@ class Train(Common):
         avg_loss = loss_total / num
         log_line = f"Train Epoch: {epoch}\tLoss: {avg_loss:.6f}\tTime: {elapsed_time:.3f}s"
         print(log_line)
-
-        with open(self.log_file, "a") as f:
-            f.write(f"{epoch},train,{avg_loss:.6f},{elapsed_time:.3f}\n")
+        # エポック単位のログは loss.log に一行だけ書く（alloc のみ記録、resv/peak は 0.0 で埋める）
+        try:
+            if torch.cuda.is_available():
+                alloc = torch.cuda.memory_allocated() / 1e6
+            else:
+                alloc = 0.0
+            with open(self.log_file, "a") as f:
+                f.write(f"{epoch},train,{avg_loss:.6f},{elapsed_time:.3f},{self.step},{alloc:.1f}\n")
+        except Exception:
+            pass
 
 
     def test(self, epoch: int, model: AbstractFold | AveragedModel, 
@@ -463,7 +458,8 @@ class Train(Common):
             self.log_file = os.path.join("logs", "loss.log")
         # ファイルをリセット
         with open(self.log_file, "w") as f:
-            f.write("epoch,phase,loss,time\n")
+            # 追加列: step, alloc_mb,
+            f.write("epoch,phase,loss,time,step,alloc_mb\n")
 
         # train_dataset = BPseqDataset(args.input)
         # if args.shape is not None:
@@ -669,7 +665,7 @@ class Train(Common):
         gparser.add_argument('--scheduler', choices=('None', 'CyclicLR', 'CosineAnnealingLR'), default='None',
                             help="learning rate scheduler ('None', 'CyclicLR', 'CosineAnnealingLR')")
         gparser.add_argument('--scheduler-step-size', type=int, default=5, help='scheduler step size (default=5)')
-        gparser.add_argument('--scheduler-gamma', type=float, default=0.95, help='scheduler decoy rate (default=0.95)')
+        gparser.add_argument('--scheduler-gamma', type=float, default=0.95, help='scheduler decoy rate (default: 0.95)')
         gparser.add_argument('--swa', default=False, action='store_true',
                             help='use stochastic weight averaging (SWA)')
         gparser.add_argument('--swa-start', type=float, default=0.75, 

@@ -136,15 +136,15 @@ class Train(Common):
                                 if hasattr(sm, "beta"):
                                     sm.beta.clamp_(min=1e-2, max=5.0)
                     
-                    # バッチ単位の情報は標準出力へ出す（ジョブの .o に流れる）。
-                    # loss.log にはエポック単位で一行だけ書くため、ここではファイル追記しない。
-                    if torch.cuda.is_available():
-                        alloc = torch.cuda.memory_allocated() / 1e6
-                        resv = torch.cuda.memory_reserved() / 1e6
-                        peak = torch.cuda.max_memory_allocated() / 1e6
-                        print(f"[Epoch {epoch} Step {self.step}] iter={i} loss={loss.item():.6e} alloc={alloc:.1f}MB resv={resv:.1f}MB peak={peak:.1f}MB")
-                    else:
-                        print(f"[Epoch {epoch} Step {self.step}] iter={i} loss={loss.item():.6e}")
+                    # # バッチ単位の情報は標準出力へ出す（ジョブの .o に流れる）。
+                    # # loss.log にはエポック単位で一行だけ書くため、ここではファイル追記しない。
+                    # if torch.cuda.is_available():
+                    #     alloc = torch.cuda.memory_allocated() / 1e6
+                    #     resv = torch.cuda.memory_reserved() / 1e6
+                    #     peak = torch.cuda.max_memory_allocated() / 1e6
+                    #     print(f"[Epoch {epoch} Step {self.step}] iter={i} loss={loss.item():.6e} alloc={alloc:.1f}MB resv={resv:.1f}MB peak={peak:.1f}MB")
+                    # else:
+                    #     print(f"[Epoch {epoch} Step {self.step}] iter={i} loss={loss.item():.6e}")
 
                 num += n_batch
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))

@@ -66,8 +66,15 @@ class ShapeMSELoss(nn.Module):
         # --- ShapeMLP による MSE ---
         mses = self.shape_model[dataset_id](seq, paired, targets)
 
-        # --- paired に対する勾配を取得 (グラフを壊さない) ---
-        grads = torch.autograd.grad(mses, paired, create_graph=True)
+        # # --- paired に対する勾配を取得 (グラフを壊さない) ---
+        # grads = torch.autograd.grad(mses, paired, create_graph=True)
+
+        # --- paired に対する勾配を取得 (高階グラフを作らない) ---
+        # create_graph=False にして shape_model 側の計算グラフを保持しない
+        grads = torch.autograd.grad(mses, paired, create_graph=False)
+        # 明示的に detach して model に渡す（不要な参照を残さない）
+        grads = tuple((g.detach().clone() if g is not None else torch.zeros_like(p))
+                      for g, p in zip(grads, paired))
 
         # --- pseudoenergy を付与して再fold ---
         ref, ref_s, _, param, _ = self.model(
@@ -84,24 +91,64 @@ class ShapeMSELoss(nn.Module):
                     if kk.startswith("count_"):
                         ref_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
 
-        # --- ADwrapper ---
+        # # --- ADwrapper ---
+        # class ADwrapper(torch.autograd.Function):
+        #     @staticmethod
+        #     def forward(ctx, *input):
+        #         return mses
+
+        #     @staticmethod
+        #     def backward(ctx, grad_output):
+        #         return tuple(p - r for p, r in zip(pred_counts, ref_counts))
+
+        # loss = ADwrapper.apply(*pred_params)
+
+        # --- ADwrapper: mses は detach() して渡し、diffs を保存して backward で人工勾配を返す ---
+        diffs = [ (pc - rc).detach().clone() for pc, rc in zip(pred_counts, ref_counts) ]
+        detached_mses = mses.detach().clone()
+
         class ADwrapper(torch.autograd.Function):
             @staticmethod
-            def forward(ctx, *input):
-                return mses
+            def forward(ctx, detached_mses_tensor, *inputs):
+                # inputs = pred_params + diffs
+                n_inputs = len(inputs)
+                # pred_params と diffs は同数で渡す想定
+                n_pred = n_inputs // 2
+                ctx.n_pred = n_pred
+                diffs_to_save = inputs[n_pred:]
+                ctx.save_for_backward(*diffs_to_save)
+                return detached_mses_tensor
 
             @staticmethod
             def backward(ctx, grad_output):
-                return tuple(p - r for p, r in zip(pred_counts, ref_counts))
+                saved = ctx.saved_tensors  # diffs
+                n_pred = ctx.n_pred
 
-        loss = ADwrapper.apply(*pred_params)
+                grads_for_pred = []
+                for d in saved:
+                    if grad_output.dim() == 0:
+                        g = d * grad_output
+                    else:
+                        shape = [grad_output.shape[0]] + [1] * (d.dim() - 1)
+                        g = d * grad_output.view(*shape)
+                    grads_for_pred.append(g)
+
+                # 戻り値の順序: (detached_mses_grad) + pred_params_grads + diffs_grads
+                # detached_mses は None、diffs 側には勾配を返さない => None
+                return (None, ) + tuple(grads_for_pred) + tuple([None] * n_pred)
+
+        loss = ADwrapper.apply(detached_mses, *pred_params, *diffs)
+        # 参照を切る
+        diffs = None
+        detached_mses = None
 
         # --- オプション: Turner 正則化 ---
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         if self.sl_weight > 0.0:
             with torch.no_grad():
                 ref2, ref2_s, _ = self.turner(seq)
-            loss += self.sl_weight * (ref - ref2) ** 2 / l
+            # loss += self.sl_weight * (ref - ref2) ** 2 / l
+            loss = loss + self.sl_weight * ((ref - ref2) ** 2).sum() / l
 
         # --- ログ出力 ---
         logging.debug(f"Loss = {loss.item()} (MSE)")

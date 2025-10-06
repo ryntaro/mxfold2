@@ -8,9 +8,9 @@ class ShapeMLP(nn.Module):
     def __init__(self, hidden_dim=64):
         super().__init__()
         self.embed = OneHotEmbedding()
-        # self.fc1 = nn.Linear(5, hidden_dim)
-        # self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        # self.fc3 = nn.Linear(hidden_dim, 1)
+        self.fc1 = nn.Linear(5, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc3 = nn.Linear(hidden_dim, 1)
         self.fc = nn.Linear(5, 1)
 
     def forward(self, seq: list[str], paired: list[torch.Tensor], targets: list[torch.Tensor]):
@@ -29,12 +29,14 @@ class ShapeMLP(nn.Module):
             # h = F.relu(self.fc1(x))
             # h = F.relu(self.fc2(h))
             # pred = self.fc3(h).squeeze(0).squeeze(-1)  # (N,)
+            
             # pred = self.fc(x).squeeze(0).squeeze(-1)  # (N,)
 
             pred = 2*(1-p)
 
-            mask = t >= -1
+            mask = t >= 0
             if mask.sum() > 0:
+                # ２乗誤差
                 losses.append(torch.mean((pred[mask] - t[mask]) ** 2))
 
         return torch.stack(losses).mean() if losses else torch.tensor(0.0, device=device)
@@ -56,9 +58,12 @@ class ShapeMLP(nn.Module):
             # h = F.relu(self.fc1(x))
             # h = F.relu(self.fc2(h))
             # pred = self.fc3(h).squeeze(0).squeeze(-1)
-            pred = self.fc(x).squeeze(0).squeeze(-1)  # (N,)
+            
+            # pred = self.fc(x).squeeze(0).squeeze(-1)  # (N,)
 
-            mask = t >= -1
+            pred = 2*(1-p)
+
+            mask = t >= 0
             if mask.sum() > 0:
                 y_true = t[mask].cpu().numpy()
                 y_pred = pred[mask].cpu().numpy()
@@ -71,5 +76,5 @@ class ShapeMLP(nn.Module):
         loss = sum(losses) / len(losses) if losses else 0.0
         mae = sum(maes) / len(maes) if maes else float("nan")
         r2 = sum(r2s) / len(r2s) if r2s else float("nan")
-
+        
         return loss, {"MAE": mae, "R2": r2}

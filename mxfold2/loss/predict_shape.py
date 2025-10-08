@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from sklearn.metrics import r2_score, mean_absolute_error
+# from sklearn.metrics import r2_score, mean_absolute_error
 from ..fold.embedding import OneHotEmbedding
 
 class ShapeMLP(nn.Module):
@@ -13,54 +13,46 @@ class ShapeMLP(nn.Module):
         self.fc3 = nn.Linear(hidden_dim, 1)
         # self.fc = nn.Linear(5, 1)
 
-    def forward(self, seq: list[str], paired: list[torch.Tensor], targets: list[torch.Tensor], return_metrics: bool = False):
+    def _encode(self, seq: list[str], paired: list[torch.Tensor]) -> list[torch.Tensor]:
         """
-        ネットワーク本体は一度だけ計算する。
-        - デフォルト: 学習用に autograd 対応の loss (torch.Tensor scalar) を返す。
-        - return_metrics=True: (loss_float, metrics_dict) を返す（予測評価用）。
+        ネットワーク本体の計算をまとめる（位置1..N に対する予測値を返す）。
+        戻り値: list of tensor (各 tensor は長さ N, index0 を含まない)
         """
         device = next(self.parameters()).device
+        preds = []
+        for s, p in zip(seq, paired):
+            x = self.embed([s]).to(device)    # (1,4,N')
+            p_trim = p[1:].to(device)
 
-        preds_and_targets = []
-        for s, p, t in zip(seq, paired, targets):
-            x = self.embed([s]).to(device)    # (1,4,N)
-            p = p[1:].to(device)
-            t = t[1:].to(device)
+            x = x.transpose(1, 2)             # (1,N',4)
+            x = torch.cat([x, p_trim.unsqueeze(0).unsqueeze(-1)], dim=-1)  # (1,N',5)
 
-            x = x.transpose(1, 2)             # (1,N,4)
-            x = torch.cat([x, p.unsqueeze(0).unsqueeze(-1)], dim=-1)  # (1,N,5)
-
-            # ネットワークはここで一回だけ実行
             h = F.relu(self.fc1(x))
             h = F.relu(self.fc2(h))
-            pred = self.fc3(h).squeeze(0).squeeze(-1)  # (N,)
+            pred = self.fc3(h).squeeze(0).squeeze(-1)  # (N',)
+            preds.append(pred)
+        return preds
 
-            preds_and_targets.append((pred, p, t))
+    def forward(self, seq: list[str], paired: list[torch.Tensor], targets: list[torch.Tensor]) -> torch.Tensor:
+        """
+        学習用 forward: 常に autograd に対応した scalar loss (torch.Tensor) を返す。
+        ネットワーク計算は _encode に委譲する。
+        """
+        device = next(self.parameters()).device
+        preds = self._encode(seq, paired)
 
-        # 常に differentiable な loss(tensor) を計算して返す（train 用互換）
         losses = []
-        for pred, p, t in preds_and_targets:
-            mask = t >= 0
+        for pred, t in zip(preds, targets):
+            t_trim = t[1:].to(device)
+            mask = t_trim >= 0
             if mask.sum() > 0:
-                losses.append(torch.mean((pred[mask] - t[mask]) ** 2))
+                losses.append(torch.mean((pred[mask] - t_trim[mask]) ** 2))
         loss_tensor = torch.stack(losses).mean() if losses else torch.tensor(0.0, device=device)
+        return loss_tensor
 
-        if not return_metrics:
-            return loss_tensor
-
-        # 評価指標を追加で計算 (autograd に影響しないよう detach() を使う)
-        losses_f, maes, r2s = [], [], []
-        for pred, p, t in preds_and_targets:
-            mask = t >= 0
-            if mask.sum() > 0:
-                y_true = t[mask].cpu().numpy()
-                y_pred = pred[mask].detach().cpu().numpy()
-                losses_f.append(((pred[mask] - t[mask]) ** 2).mean().item())
-                maes.append(mean_absolute_error(y_true, y_pred))
-                if len(y_true) > 1:
-                    r2s.append(r2_score(y_true, y_pred))
-
-        loss_f = sum(losses_f) / len(losses_f) if losses_f else 0.0
-        mae = sum(maes) / len(maes) if maes else float("nan")
-        r2 = sum(r2s) / len(r2s) if r2s else float("nan")
-        return loss_f, {"MAE": mae, "R2": r2}
+    def predict(self, seq: list[str], paired: list[torch.Tensor]) -> list[torch.Tensor]:
+        
+        device = next(self.parameters()).device
+        preds_trim = self._encode(seq, paired)
+        # そのまま長さ L の予測を返す（index0 を含めない）
+        return preds_trim

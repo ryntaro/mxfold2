@@ -23,6 +23,8 @@ from .common import Common
 
 from .loss.predict_shape import ShapeMLP
 from .shape_model import build_shape_model
+from .compShape import compare_shape  # 追加
+
 
 class Predict(Common):
     def __init__(self):
@@ -94,8 +96,11 @@ class Predict(Common):
                         nlls = self.shape_model(seqs, paired, targets)
                         metrics = {"NLL": nlls.mean().item()}
                     elif self.shape_model_name == "MLP":
-                        _, metrics = self.shape_model.predict(seqs, paired, targets)
-                    
+                        # _, metrics = self.shape_model.predict(seqs, paired, targets)
+                        # _, metrics = self.shape_model(seqs, paired, targets, return_metrics=True)
+                        shape_preds = self.shape_model.predict(seqs, paired)
+                        metrics = compare_shape(shape_preds, targets)
+
                     pred_shapes = [None] * len(seqs)
 
                 else:

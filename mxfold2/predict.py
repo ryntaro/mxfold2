@@ -98,8 +98,10 @@ class Predict(Common):
                     elif self.shape_model_name == "MLP":
                         # _, metrics = self.shape_model.predict(seqs, paired, targets)
                         # _, metrics = self.shape_model(seqs, paired, targets, return_metrics=True)
+
                         shape_preds = self.shape_model.predict(seqs, paired)
-                        metrics = compare_shape(shape_preds, targets)
+                        
+                        metrics = compare_shape(shape_preds[0], targets[0][1:])
 
                     pred_shapes = [None] * len(seqs)
 
@@ -183,6 +185,7 @@ class Predict(Common):
                             # struct_metrics += [round(mse, 3), round(r2, 3), round(corr, 3)]
                         elif task == "Implicit_MLE":
                             if "R2" in metrics:  # ShapeMLP
+                                print(metrics)
                                 struct_metrics += [metrics["R2"], metrics["MAE"]]
                             elif "NLL" in metrics:  # Wu/Foo
                                 struct_metrics += [metrics["NLL"]]

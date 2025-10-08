@@ -8,10 +8,10 @@ class ShapeMLP(nn.Module):
     def __init__(self, hidden_dim=64):
         super().__init__()
         self.embed = OneHotEmbedding()
-        self.fc1 = nn.Linear(5, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, 1)
-        # self.fc = nn.Linear(5, 1)
+        # self.fc1 = nn.Linear(5, hidden_dim)
+        # self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        # self.fc3 = nn.Linear(hidden_dim, 1)
+        self.fc = nn.Linear(5, 1)
 
     def _encode(self, seq: list[str], paired: list[torch.Tensor]) -> list[torch.Tensor]:
         """
@@ -27,9 +27,14 @@ class ShapeMLP(nn.Module):
             x = x.transpose(1, 2)             # (1,N',4)
             x = torch.cat([x, p_trim.unsqueeze(0).unsqueeze(-1)], dim=-1)  # (1,N',5)
 
-            h = F.relu(self.fc1(x))
-            h = F.relu(self.fc2(h))
-            pred = self.fc3(h).squeeze(0).squeeze(-1)  # (N',)
+            # h = F.relu(self.fc1(x))
+            # h = F.relu(self.fc2(h))
+            # pred = self.fc3(h).squeeze(0).squeeze(-1)  # (N',)
+
+            pred = self.fc(x).squeeze(0).squeeze(-1)  # (N',)
+
+            # pred = 2*(1-p)
+
             preds.append(pred)
         return preds
 

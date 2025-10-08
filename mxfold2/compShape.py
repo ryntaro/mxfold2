@@ -20,6 +20,8 @@ def compare_shape(y_true, y_pred) -> Tuple[float, float, float, float]:
     yt = _to_numpy(y_true)
     yp = _to_numpy(y_pred)
 
+    # print("y_true", yt)
+    # print("y_pred", yp)
     # 正解ラベルで 0 未満の要素は評価対象外
     valid = yt >= 0
 

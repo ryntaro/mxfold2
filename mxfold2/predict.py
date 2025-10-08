@@ -101,7 +101,7 @@ class Predict(Common):
 
                         shape_preds = self.shape_model.predict(seqs, paired)
                         
-                        metrics = compare_shape(shape_preds[0], targets[0][1:])
+                        metrics = compare_shape(targets[0][1:], shape_preds[0])
 
                     pred_shapes = [None] * len(seqs)
 

@@ -10,7 +10,6 @@ import torch.autograd
 from ..fold.fold import AbstractFold
 from .predict_shape import ShapeMLP
 
-
 class ShapeMSELoss(nn.Module):
     def __init__(self, model: AbstractFold,
                  shape_model: list[nn.Module],
@@ -27,7 +26,7 @@ class ShapeMSELoss(nn.Module):
         self.sl_weight = sl_weight
 
         # unused, kept for compatibility
-        self.shape_predictor = ShapeMLP(hidden_dim=64)
+        self.shape_predictor = ShapeMLP()
 
         if sl_weight > 0.0:
             from .. import param_turner2004
@@ -71,7 +70,11 @@ class ShapeMSELoss(nn.Module):
 
         # --- paired に対する勾配を取得 (高階グラフを作らない) ---
         # create_graph=False にして shape_model 側の計算グラフを保持しない
-        grads = torch.autograd.grad(mses, paired, create_graph=False)
+        # grads = torch.autograd.grad(mses, paired, create_graph=False)
+        
+        # mseの計算グラフは残したい
+        grads = torch.autograd.grad(mses, paired, create_graph=False, retain_graph=True)
+        
         # 明示的に detach して model に渡す（不要な参照を残さない）
         grads = tuple((g.detach().clone() if g is not None else torch.zeros_like(p))
                       for g, p in zip(grads, paired))
@@ -90,18 +93,6 @@ class ShapeMSELoss(nn.Module):
                 for kk in sorted(param[0][k].keys()):
                     if kk.startswith("count_"):
                         ref_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
-
-        # # --- ADwrapper ---
-        # class ADwrapper(torch.autograd.Function):
-        #     @staticmethod
-        #     def forward(ctx, *input):
-        #         return mses
-
-        #     @staticmethod
-        #     def backward(ctx, grad_output):
-        #         return tuple(p - r for p, r in zip(pred_counts, ref_counts))
-
-        # loss = ADwrapper.apply(*pred_params)
 
         # --- ADwrapper: mses は detach() して渡し、diffs を保存して backward で人工勾配を返す ---
         diffs = [ (pc - rc).detach().clone() for pc, rc in zip(pred_counts, ref_counts) ]
@@ -138,6 +129,10 @@ class ShapeMSELoss(nn.Module):
                 return (None, ) + tuple(grads_for_pred) + tuple([None] * n_pred)
 
         loss = ADwrapper.apply(detached_mses, *pred_params, *diffs)
+
+        # Shape予測器はmseから学習する
+        loss = loss + mses
+
         # 参照を切る
         diffs = None
         detached_mses = None
@@ -147,7 +142,6 @@ class ShapeMSELoss(nn.Module):
         if self.sl_weight > 0.0:
             with torch.no_grad():
                 ref2, ref2_s, _ = self.turner(seq)
-            # loss += self.sl_weight * (ref - ref2) ** 2 / l
             loss = loss + self.sl_weight * ((ref - ref2) ** 2).sum() / l
 
         # --- ログ出力 ---

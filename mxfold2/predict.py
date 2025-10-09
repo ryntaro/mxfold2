@@ -185,7 +185,7 @@ class Predict(Common):
                             # struct_metrics += [round(mse, 3), round(r2, 3), round(corr, 3)]
                         elif task == "Implicit_MLE":
                             if "R2" in metrics:  # ShapeMLP
-                                print(metrics)
+                                # print(metrics)
                                 struct_metrics += [metrics["R2"], metrics["MAE"]]
                             elif "NLL" in metrics:  # Wu/Foo
                                 struct_metrics += [metrics["NLL"]]

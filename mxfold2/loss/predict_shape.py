@@ -1,17 +1,36 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-# from sklearn.metrics import r2_score, mean_absolute_error
 from ..fold.embedding import OneHotEmbedding
 
-class ShapeMLP(nn.Module):
-    def __init__(self, hidden_dim=64):
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model: int, dropout: float = 0.0, max_len: int = 10000):
         super().__init__()
-        self.embed = OneHotEmbedding()
-        # self.fc1 = nn.Linear(5, hidden_dim)
-        # self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        # self.fc3 = nn.Linear(hidden_dim, 1)
-        self.fc = nn.Linear(5, 1)
+        self.dropout = nn.Dropout(dropout)
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)  # (1, max_len, d_model)
+        self.register_buffer("pe", pe)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, L, D)
+        L = x.size(1)
+        x = x + self.pe[:, :L, :].to(x.device)
+        return self.dropout(x)
+
+class ShapeMLP(nn.Module):
+    def __init__(self, d_model: int = 64, nhead: int = 8, nlayers: int = 2, dim_feedforward: int = 256, dropout: float = 0.1, max_len: int = 10000):
+        super().__init__()
+        self.embed = OneHotEmbedding()   # produces (B,4,L)
+        self.input_proj = nn.Linear(5, d_model)
+        self.pos_enc = PositionalEncoding(d_model, dropout=dropout, max_len=max_len)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward, dropout=dropout, batch_first=True)
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=nlayers)
+        self.out_proj = nn.Linear(d_model, 1)
 
     def _encode(self, seq: list[str], paired: list[torch.Tensor]) -> list[torch.Tensor]:
         """
@@ -22,19 +41,15 @@ class ShapeMLP(nn.Module):
         preds = []
         for s, p in zip(seq, paired):
             x = self.embed([s]).to(device)    # (1,4,N')
-            p_trim = p[1:].to(device)
-
-            x = x.transpose(1, 2)             # (1,N',4)
+            # p は構造モデルが出す位置ごとの確率（連続値）を想定
+            p_trim = p[1:].to(device).float()  # (N',) — float で detach しないこと
+            x = x.transpose(1, 2)               # (1,N',4)
             x = torch.cat([x, p_trim.unsqueeze(0).unsqueeze(-1)], dim=-1)  # (1,N',5)
-
-            # h = F.relu(self.fc1(x))
-            # h = F.relu(self.fc2(h))
-            # pred = self.fc3(h).squeeze(0).squeeze(-1)  # (N',)
-
-            # pred = self.fc(x).squeeze(0).squeeze(-1)  # (N',)
-
-            pred = 2*(1-p_trim)
-
+            # project -> transformer expects (B, L, D)
+            x = self.input_proj(x)              # (1,N',d_model)
+            x = self.pos_enc(x)                 # (1,N',d_model)
+            h = self.transformer(x)             # (1,N',d_model)
+            pred = self.out_proj(h).squeeze(0).squeeze(-1)  # (N',)
             preds.append(pred)
         return preds
 
@@ -56,7 +71,6 @@ class ShapeMLP(nn.Module):
         return loss_tensor
 
     def predict(self, seq: list[str], paired: list[torch.Tensor]) -> list[torch.Tensor]:
-        
         device = next(self.parameters()).device
         preds_trim = self._encode(seq, paired)
         # そのまま長さ L の予測を返す（index0 を含めない）

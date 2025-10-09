@@ -66,7 +66,8 @@ class ShapeMLP(nn.Module):
             t_trim = t[1:].to(device)
             mask = t_trim >= 0
             if mask.sum() > 0:
-                losses.append(torch.mean((pred[mask] - t_trim[mask]) ** 2))
+                losses.append(torch.mean(torch.abs(pred[mask] - t_trim[mask])))
+                # losses.append(torch.mean((pred[mask] - t_trim[mask]) ** 2))
         loss_tensor = torch.stack(losses).mean() if losses else torch.tensor(0.0, device=device)
         return loss_tensor
 

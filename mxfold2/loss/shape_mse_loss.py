@@ -63,19 +63,10 @@ class ShapeMSELoss(nn.Module):
         targets = [t.to(pred.device) for t in targets]
 
         # --- ShapeMLP による MSE ---
-        mses = self.shape_model[dataset_id](seq, paired, targets)
+        Reg_loss = self.shape_model[dataset_id](seq, paired, targets)
+                
+        grads = torch.autograd.grad(Reg_loss, paired, create_graph=False, retain_graph=True)
 
-        # # --- paired に対する勾配を取得 (グラフを壊さない) ---
-        # grads = torch.autograd.grad(mses, paired, create_graph=True)
-
-        # --- paired に対する勾配を取得 (高階グラフを作らない) ---
-        # create_graph=False にして shape_model 側の計算グラフを保持しない
-        # grads = torch.autograd.grad(mses, paired, create_graph=False)
-        
-        # mseの計算グラフは残したい
-        grads = torch.autograd.grad(mses, paired, create_graph=False, retain_graph=True)
-        
-        # 明示的に detach して model に渡す（不要な参照を残さない）
         grads = tuple((g.detach().clone() if g is not None else torch.zeros_like(p))
                       for g, p in zip(grads, paired))
 
@@ -94,9 +85,9 @@ class ShapeMSELoss(nn.Module):
                     if kk.startswith("count_"):
                         ref_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
 
-        # --- ADwrapper: mses は detach() して渡し、diffs を保存して backward で人工勾配を返す ---
+        # --- ADwrapper: Reg_loss は detach() して渡し、diffs を保存して backward で人工勾配を返す ---
         diffs = [ (pc - rc).detach().clone() for pc, rc in zip(pred_counts, ref_counts) ]
-        detached_mses = mses.detach().clone()
+        detached_Reg_loss = Reg_loss.detach().clone()
 
         class ADwrapper(torch.autograd.Function):
             @staticmethod
@@ -125,17 +116,18 @@ class ShapeMSELoss(nn.Module):
                     grads_for_pred.append(g)
 
                 # 戻り値の順序: (detached_mses_grad) + pred_params_grads + diffs_grads
-                # detached_mses は None、diffs 側には勾配を返さない => None
+                # detached_Reg_loss は None、diffs 側には勾配を返さない => None
                 return (None, ) + tuple(grads_for_pred) + tuple([None] * n_pred)
 
-        loss = ADwrapper.apply(detached_mses, *pred_params, *diffs)
+        # loss = ADwrapper.apply(detached_Reg_loss, *pred_params, *diffs)
+        loss = ADwrapper.apply(Reg_loss, *pred_params, *diffs)
 
         # Shape予測器はmseから学習する
-        loss = loss + mses
+        loss = loss + Reg_loss
 
         # 参照を切る
         diffs = None
-        detached_mses = None
+        detached_Reg_loss = None
 
         # --- オプション: Turner 正則化 ---
         l = torch.tensor([len(s) for s in seq], device=pred.device)
@@ -167,4 +159,5 @@ class ShapeMSELoss(nn.Module):
         #         l2_reg += torch.sum(p ** 2)
         #     loss += self.l2_weight * l2_reg
 
+        
         return loss

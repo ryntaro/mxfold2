@@ -105,6 +105,13 @@ class Train(Common):
                     else:
                         loss.backward()
 
+                    # --- grad check for shape_model (only Implicit_MLE task) ---
+                    if hasattr(loss_fn, "shape_model") and loss_fn.shape_model is not None:
+                        for i, sm in enumerate(loss_fn.shape_model):
+                            for n, p in sm.named_parameters():
+                                grad_mean = None if p.grad is None else p.grad.abs().mean().item()
+                                print(f"[grad-check] shape_model[{i}].{n} grad={grad_mean}")
+
                     # Gradient clipping with unscaling if using mixed precision
                     if scaler is not None:
                         scaler.unscale_(optimizer)
@@ -315,7 +322,7 @@ class Train(Common):
         if shape_model is not None:
             for sm in shape_model:
                 optim_params.append({'params': sm.parameters(), 'lr': lr, 'weight_decay': l2_weight})
-
+        
         if optimizer == 'Adam':
             return optim.Adam(optim_params, amsgrad=False)
         elif optimizer =='AdamW':
@@ -518,7 +525,7 @@ class Train(Common):
         shape_model = None 
         if args.task == "Implicit_MLE":
             shape_model = [ build_shape_model(args) for _ in args.shape ]
-        
+
         if args.init_param != '':
             init_param = Path(args.init_param)
             if not init_param.exists() and conf is not None:

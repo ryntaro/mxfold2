@@ -46,11 +46,12 @@ class Wu(nn.Module):
 
     def forward(self, seq: list[str], paired: list[torch.tensor], targets: list[torch.Tensor]):
 
-        # self.xi.data.clamp_(min=1e-2)
-        # self.sigma.data.clamp_(min=1e-2)
-        # self.alpha.data.clamp_(min=1e-2)
-        # self.beta.data.clamp_(min=1e-2)
-        
+        self.xi.data.clamp_(min=1e-2, max=2.0)
+        self.sigma.data.clamp_(min=1e-2, max=2.0)
+        self.mu.data.clamp_(min=1e-2, max=2.0)
+        self.alpha.data.clamp_(min=1e-2, max=5.0)
+        self.beta.data.clamp_(min=1e-2, max=5.0)
+
         nlls = []
         for i in range(len(seq)):
             # valid = targets[i] > -1 # to ignore missing values (-999)

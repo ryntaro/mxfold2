@@ -97,12 +97,19 @@ class ShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
             for l in f:
                 if not l.startswith('#'):
                     l = l.rstrip('\n').split()
-                    if len(l) > 2:
-                        idx, c, reactivity = l
-                        reactivity = float(reactivity)
-                    elif len(l) == 2:
-                        idx, c = l
+                    # if len(l) > 2:
+                        # idx, c, reactivity = l
+                        # reactivity = float(reactivity)
+                    # elif len(l) == 2:
+                        # idx, c = l
+                        # reactivity = -999.
+
+                    idx, c, val = l
+                    try:
+                        reactivity = float(val)
+                    except ValueError:
                         reactivity = -999.
+                    
                     s.append(c)
                     p.append(reactivity)
                     m.append(1 if reactivity != -999 else 0.0)

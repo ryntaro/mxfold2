@@ -123,7 +123,7 @@ class ShapeMSELoss(nn.Module):
         loss = ADwrapper.apply(Reg_loss, *pred_params, *diffs)
 
         # Shape予測器はmseから学習する
-        loss = loss + Reg_loss
+        # loss = loss + Reg_loss
 
         # 参照を切る
         diffs = None

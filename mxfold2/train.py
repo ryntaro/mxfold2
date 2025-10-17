@@ -99,6 +99,8 @@ class Train(Common):
                     loss_total += loss.item()
                     running_loss += loss.item()
                     
+                    before = loss_fn['SHAPE'].shape_model[0].input_proj.weight.clone()
+
                     # Scale loss and backward pass
                     if scaler is not None:
                         scaler.scale(loss).backward()
@@ -106,11 +108,14 @@ class Train(Common):
                         loss.backward()
 
                     # --- grad check for shape_model (only Implicit_MLE task) ---
-                    if hasattr(loss_fn, "shape_model") and loss_fn.shape_model is not None:
-                        for i, sm in enumerate(loss_fn.shape_model):
-                            for n, p in sm.named_parameters():
-                                grad_mean = None if p.grad is None else p.grad.abs().mean().item()
-                                print(f"[grad-check] shape_model[{i}].{n} grad={grad_mean}")
+                    # if isinstance(loss_fn, dict) and 'SHAPE' in loss_fn:
+                    #     sm_list = getattr(loss_fn['SHAPE'], "shape_model", None)
+                    #     if sm_list is not None:
+                    #         for i, sm in enumerate(sm_list):
+                    #             for n, p in sm.named_parameters():
+                    #                 grad_mean = None if p.grad is None else p.grad.abs().mean().item()
+                    #                 print(f"[grad-check] shape_model[{i}].{n} grad={grad_mean}")
+
 
                     # Gradient clipping with unscaling if using mixed precision
                     if scaler is not None:
@@ -128,20 +133,23 @@ class Train(Common):
                     else:
                         optimizer.step()
 
+                    diff = (loss_fn['SHAPE'].shape_model[0].input_proj.weight - before).abs().mean()
+                    print("mean update:", diff.item())
+
                     # --- パラメータ制約（Wu など shape_model 用） ---
-                    with torch.no_grad():
-                        if hasattr(loss_fn, "shape_model") and loss_fn.shape_model is not None:
-                            for sm in loss_fn.shape_model:
-                                if hasattr(sm, "xi"):
-                                    sm.xi.clamp_(min=1e-2, max=2.0)
-                                if hasattr(sm, "mu"):
-                                    sm.mu.clamp_(min=0.0, max=2.0)
-                                if hasattr(sm, "sigma"):
-                                    sm.sigma.clamp_(min=1e-2, max=2.0)
-                                if hasattr(sm, "alpha"):
-                                    sm.alpha.clamp_(min=1e-2, max=5.0)
-                                if hasattr(sm, "beta"):
-                                    sm.beta.clamp_(min=1e-2, max=5.0)
+                    # with torch.no_grad():
+                    #     if hasattr(loss_fn, "shape_model") and loss_fn.shape_model is not None:
+                    #         for sm in loss_fn.shape_model:
+                    #             if hasattr(sm, "xi"):
+                    #                 sm.xi.clamp_(min=1e-2, max=2.0)
+                    #             if hasattr(sm, "mu"):
+                    #                 sm.mu.clamp_(min=0.0, max=2.0)
+                    #             if hasattr(sm, "sigma"):
+                    #                 sm.sigma.clamp_(min=1e-2, max=2.0)
+                    #             if hasattr(sm, "alpha"):
+                    #                 sm.alpha.clamp_(min=1e-2, max=5.0)
+                    #             if hasattr(sm, "beta"):
+                    #                 sm.beta.clamp_(min=1e-2, max=5.0)
                     
                     # # バッチ単位の情報は標準出力へ出す（ジョブの .o に流れる）。
                     # # loss.log にはエポック単位で一行だけ書くため、ここではファイル追記しない。

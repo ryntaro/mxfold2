@@ -15,5 +15,9 @@ def build_shape_model(args: Namespace) -> nn.Module:
     elif args.shape_model == 'MLP':
         from .loss.predict_shape import ShapeMLP
         return ShapeMLP()
+    elif args.shape_model == 'External':
+        from .loss.external_shape_predictor import ExternalShapePredictor
+        # 例: args から外部モデルロード関数やパスを受け取る実装に置き換えてください
+        return ExternalShapePredictor(predictor=None)
     else:
         raise ValueError(f'not implemented: {args.shape_model}')

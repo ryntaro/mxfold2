@@ -136,20 +136,6 @@ class Train(Common):
                     diff = (loss_fn['SHAPE'].shape_model[0].input_proj.weight - before).abs().mean()
                     print("mean update:", diff.item())
 
-                    # --- パラメータ制約（Wu など shape_model 用） ---
-                    # with torch.no_grad():
-                    #     if hasattr(loss_fn, "shape_model") and loss_fn.shape_model is not None:
-                    #         for sm in loss_fn.shape_model:
-                    #             if hasattr(sm, "xi"):
-                    #                 sm.xi.clamp_(min=1e-2, max=2.0)
-                    #             if hasattr(sm, "mu"):
-                    #                 sm.mu.clamp_(min=0.0, max=2.0)
-                    #             if hasattr(sm, "sigma"):
-                    #                 sm.sigma.clamp_(min=1e-2, max=2.0)
-                    #             if hasattr(sm, "alpha"):
-                    #                 sm.alpha.clamp_(min=1e-2, max=5.0)
-                    #             if hasattr(sm, "beta"):
-                    #                 sm.beta.clamp_(min=1e-2, max=5.0)
                     
                     # # バッチ単位の情報は標準出力へ出す（ジョブの .o に流れる）。
                     # # loss.log にはエポック単位で一行だけ書くため、ここではファイル追記しない。
@@ -371,20 +357,6 @@ class Train(Common):
         else:
             raise(ValueError(f'not implemented: {loss_func}'))
 
-    # shape_model.pyに分離させた
-    # def build_shape_model(self, args: Namespace) -> nn.Module:
-    #     if args.shape_model == 'Wu':
-    #         from .fold.shape_layers import Wu
-    #         return Wu(xi=0.774, mu=0.078, sigma=0.083, alpha=1.006, beta=1.404)
-    #     elif args.shape_model == 'Foo':
-    #         from .fold.shape_layers import Foo
-    #         return Foo(p_alpha=0.540, p_beta=1.390, u_alpha=1.006, u_beta=1.404)
-    #     elif args.shape_model == 'MLP':
-    #         from .loss.predict_shape import ShapeMLP
-    #         return ShapeMLP()
-    #     else:
-    #         raise(ValueError(f'not implemented: {args.shape_model}'))
-
 
     def build_shape_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace,
                                 shape_model: Optional[nn.Module] = None) -> nn.Module:
@@ -555,7 +527,10 @@ class Train(Common):
         torch.set_num_threads(args.threads)
         interface.set_num_threads(args.threads)
 
-        optimizer = self.build_optimizer(args.optimizer, model, args.lr, args.l2_weight, shape_model=shape_model)
+        if args.shape_model == 'External':
+            optimizer = self.build_optimizer(args.optimizer, model, args.lr, args.l2_weight)
+        else: 
+            optimizer = self.build_optimizer(args.optimizer, model, args.lr, args.l2_weight, shape_model=shape_model)
 
         loss_fn = {
             'BPSEQ': self.build_loss_function(args.loss_func, model, args), 
@@ -620,7 +595,6 @@ class Train(Common):
             self.save_config(args.save_config, config)
         
         #return self.model
-
 
 
     @classmethod

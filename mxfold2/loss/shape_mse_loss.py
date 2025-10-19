@@ -9,6 +9,7 @@ import torch.autograd
 
 from ..fold.fold import AbstractFold
 from .predict_shape import ShapeMLP
+from .external_shape_predictor import ExternalShapePredictor
 
 class ShapeMSELoss(nn.Module):
     def __init__(self, model: AbstractFold,
@@ -24,9 +25,6 @@ class ShapeMSELoss(nn.Module):
         self.l1_weight = l1_weight
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
-
-        # unused, kept for compatibility
-        self.shape_predictor = ShapeMLP()
 
         if sl_weight > 0.0:
             from .. import param_turner2004

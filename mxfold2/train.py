@@ -99,8 +99,6 @@ class Train(Common):
                     loss_total += loss.item()
                     running_loss += loss.item()
                     
-                    before = loss_fn['SHAPE'].shape_model[0].input_proj.weight.clone()
-
                     # Scale loss and backward pass
                     if scaler is not None:
                         scaler.scale(loss).backward()
@@ -132,9 +130,6 @@ class Train(Common):
                         scaler.update()
                     else:
                         optimizer.step()
-
-                    diff = (loss_fn['SHAPE'].shape_model[0].input_proj.weight - before).abs().mean()
-                    print("mean update:", diff.item())
 
                     
                     # # バッチ単位の情報は標準出力へ出す（ジョブの .o に流れる）。

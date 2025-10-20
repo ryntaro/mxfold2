@@ -21,10 +21,8 @@ from .dataset import BPseqDataset, FastaDataset, MultiTaskDataset
 from .fold.fold import AbstractFold
 from .common import Common
 
-from .loss.predict_shape import ShapeMLP
 from .shape_model import build_shape_model
 from .compShape import compare_shape  # 追加
-
 
 class Predict(Common):
     def __init__(self):
@@ -95,9 +93,7 @@ class Predict(Common):
                     if self.shape_model_name in ("Wu", "Foo"):
                         nlls = self.shape_model(seqs, paired, targets)
                         metrics = {"NLL": nlls.mean().item()}
-                    elif self.shape_model_name == "MLP":
-                        # _, metrics = self.shape_model.predict(seqs, paired, targets)
-                        # _, metrics = self.shape_model(seqs, paired, targets, return_metrics=True)
+                    elif self.shape_model_name in ("MLP", "External"):
 
                         shape_preds = self.shape_model.predict(seqs, paired)
                         
@@ -155,9 +151,9 @@ class Predict(Common):
                             if task == "Multitask":
                                 names += ["mse", "r2", "mae"]
                             elif task == "Implicit_MLE":
-                                if "R2" in metrics:   # MLP
+                                if "R2" in metrics:  # Regression
                                     names += ["r2", "mae"]
-                                elif "NLL" in metrics:  # Wu/Foo
+                                elif "NLL" in metrics:  # Wu/Foo likelihood
                                     names += ["nll"]
                             res_fn.write(",".join(names) + "\n")   # ✅ ヘッダーはここでだけ書く
 
@@ -184,8 +180,7 @@ class Predict(Common):
                             struct_metrics += [mse, r2, corr]
                             # struct_metrics += [round(mse, 3), round(r2, 3), round(corr, 3)]
                         elif task == "Implicit_MLE":
-                            if "R2" in metrics:  # ShapeMLP
-                                # print(metrics)
+                            if "R2" in metrics:  # Regression
                                 struct_metrics += [metrics["R2"], metrics["MAE"]]
                             elif "NLL" in metrics:  # Wu/Foo
                                 struct_metrics += [metrics["NLL"]]

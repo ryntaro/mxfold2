@@ -10,8 +10,8 @@ from train import ShapeTransformer
 class ExternalShapePredictor(nn.Module):
     """
     外部 SHAPEtransformer モデルを読み込み、
-    - predict(): shape reactivity 予測
-    - forward(): loss 計算
+    - predict(): shape reactivity 予測 (list[str], list[Tensor]) -> list[Tensor]
+    - forward(): loss 計算 (list[str], list[Tensor], list[Tensor]) -> scalar loss
     """
 
     def __init__(self, model_path: str | Path = None, device: str | None = None, loss_type: str = "mse"):
@@ -19,85 +19,121 @@ class ExternalShapePredictor(nn.Module):
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.loss_type = loss_type
 
-        # --- モデルパス固定 ---
+        # --- デフォルトモデルパス ---
         if model_path is None:
-            model_path = Path("/gs/bs/tga-satolab-gtex/yamauchi/SHAPEtransformer/logs/5127328/model.pth")
+            model_path = Path("/gs/bs/tga-satolab-gtex/yamauchi/SHAPEtransformer/logs/5136586/train/epoch-20.pth")
 
-        # --- モデルロード ---
-        ckpt = torch.load(model_path, map_location=self.device, weights_only=False)
+        # --- チェックポイント読み込み（安全モード優先） ---
+        try:
+            ckpt = torch.load(model_path, map_location=self.device, weights_only=True)
+        except Exception:
+            # フォールバック: 信頼できる ckpt のみで使うこと
+            ckpt = torch.load(model_path, map_location=self.device, weights_only=False)
 
-        args = ckpt.get("args", {})
+        # normalize checkpoint -> state and args
+        if isinstance(ckpt, dict):
+            ck_args = ckpt.get("args", {}) or {}
+            state = ckpt.get("model_state_dict", ckpt.get("model_state", ckpt))
+        else:
+            ck_args = {}
+            state = ckpt
+
+        # instantiate model using saved args (fallback defaults)
         self.model = ShapeTransformer(
-            d_model=int(args.get("dim", 128)),
-            nhead=int(args.get("nhead", 8)),
-            num_layers=int(args.get("layers", 4)),
-            partner_bins=int(args.get("partner_bins", 33))
+            d_model=int(ck_args.get("dim", 128)),
+            nhead=int(ck_args.get("nhead", 8)),
+            num_layers=int(ck_args.get("layers", 2)),
+            dim_feedforward=int(ck_args.get("dim_feedforward", 256)),
+            dropout=float(ck_args.get("dropout", 0.1)),
+            max_len=int(ck_args.get("max_len", 10000)),
         ).to(self.device)
 
-        self.model.load_state_dict(ckpt["model_state"])
+        # load parameters (support nested formats)
+        try:
+            self.model.load_state_dict(state)
+        except Exception:
+            if isinstance(state, dict) and "model_state_dict" in state:
+                self.model.load_state_dict(state["model_state_dict"])
+            elif isinstance(state, dict) and "model_state" in state:
+                self.model.load_state_dict(state["model_state"])
+            else:
+                # let exception surface for debugging
+                raise
+
         self.model.eval()
 
-        # 塩基→インデックス変換表
-        self.BASE_VOCAB = {"A": 0, "C": 1, "G": 2, "U": 3, "T": 3, "N": 4}
-        self.PAD_IDX = 5
+    # helper: convert tensor of base indices -> sequence string (if needed)
+    def _tensor_to_seq(self, t: torch.Tensor) -> str:
+        t = t.detach().cpu().squeeze()
+        idx_to_base = {0: "A", 1: "C", 2: "G", 3: "U", 4: "N", 5: "N"}
+        return "".join(idx_to_base.get(int(x), "N") for x in t.tolist())
 
     # ------------------------------------------------------------
-    # 前処理: 文字列→Tensor変換 & ダミー列削除
+    # 前処理: 現在は seq は文字列期待、partner/target は index0 を含む1次元テンソル期待
     # ------------------------------------------------------------
-    def _prepare_inputs(self, seq, partner, target=None):
-        # seq: 文字列なら Tensor に変換
+    def _prepare_single(self, seq, paired, target=None):
+        # seq: accept str or 1d-tensor-of-indices
         if isinstance(seq, str):
-            seq = torch.tensor(
-                [[self.BASE_VOCAB.get(b, self.PAD_IDX) for b in seq]],
-                dtype=torch.long, device=self.device
-            )
+            seq_str = seq
+        elif torch.is_tensor(seq):
+            seq_str = self._tensor_to_seq(seq)
         else:
-            seq = seq.unsqueeze(0).to(self.device)
+            raise TypeError("seq must be str or Tensor of base indices")
 
-        # partner: Tensor化 & 先頭のダミー削除
-        partner = partner.unsqueeze(0).to(self.device)[:, 1:]
+        # paired: expect 1D tensor length L+1 (index0 included) or convertible
+        if torch.is_tensor(paired):
+            # do not detach here — keep graph connectivity; move to device
+            paired_t = paired.to(self.device).squeeze()
+        else:
+            paired_t = torch.tensor(paired, device=self.device)
 
-        # target: あればダミー削除
+        # target: if provided, keep index0 included
         if target is not None:
-            target = target.unsqueeze(0).float().to(self.device)[:, 1:]
+            if torch.is_tensor(target):
+                target_t = target.detach().to(self.device).squeeze()
+            else:
+                target_t = torch.tensor(target, device=self.device)
+        else:
+            target_t = None
 
-        # mask: 全位置有効（パディングがないため全True）
-        mask = torch.ones_like(partner, dtype=torch.bool, device=self.device)
-
-        return seq, partner, target, mask
+        return seq_str, paired_t, target_t
 
     # ------------------------------------------------------------
     # 推論モード: shape reactivity 予測
     # ------------------------------------------------------------
     @torch.no_grad()
-    def predict(self, seq_list, partner_list):
-        preds = []
-        for seq, partner in zip(seq_list, partner_list):
-            seq, partner, _, mask = self._prepare_inputs(seq, partner)
-            pred = self.model(seq, partner, mask)
-            preds.append(pred.squeeze(0).detach().cpu())
-        return preds
+    def predict(self, seq_list, paired_list):
+        # seq_list: iterable of str or 1D-tensor
+        # paired_list: iterable of 1D-tensor (index0 included)
+        seqs = []
+        paireds = []
+        for seq, paired in zip(seq_list, paired_list):
+            seq_s, paired_t, _ = self._prepare_single(seq, paired)
+            seqs.append(seq_s)
+            paireds.append(paired_t)
+
+        preds = self.model.predict(seqs, paireds)  # list[Tensor] on device
+        # move to cpu tensors
+        return [p.detach().cpu() for p in preds]
 
     # ------------------------------------------------------------
     # 学習モード: loss 計算（MSE または MAE）
     # ------------------------------------------------------------
-    def forward(self, seq_list, partner_list, target_list):
-        losses = []
-        for seq, partner, target in zip(seq_list, partner_list, target_list):
-            seq, partner, target, mask = self._prepare_inputs(seq, partner, target)
-            pred = self.model(seq, partner, mask)
+    def forward(self, seq_list, paired_list, target_list, paired_requires_grad: bool = False):
+        # prepare lists
+        seqs = []
+        paireds = []
+        targets = []
+        for seq, paired, target in zip(seq_list, paired_list, target_list):
+            seq_s, paired_t, target_t = self._prepare_single(seq, paired, target)
+            if paired_requires_grad:
+                # if we need grad wrt paired, ensure tensor requires grad on device
+                paired_t = paired_t.clone().to(self.device)
+                paired_t.requires_grad_(True)
+            paireds.append(paired_t)
+            seqs.append(seq_s)
+            targets.append(target_t if target_t is not None else torch.full((paireds[-1].shape[0]-1,), float("nan"), device=self.device))
 
-            # target の欠損位置を除外
-            valid = torch.isfinite(target) & (target > -999)
-            if valid.sum() == 0:
-                continue
-
-            if self.loss_type == "mae":
-                loss = torch.mean(torch.abs(pred[valid] - target[valid]))
-            else:
-                loss = torch.mean((pred[valid] - target[valid]) ** 2)
-            losses.append(loss)
-
-        if not losses:
-            return torch.tensor(0.0, device=self.device)
-        return torch.stack(losses).mean()
+        # delegate to model.forward which returns autograd-enabled scalar loss
+        loss = self.model(seqs, paireds, targets)
+        return loss

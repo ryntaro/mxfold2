@@ -21,7 +21,7 @@ class ExternalShapePredictor(nn.Module):
 
         # --- デフォルトモデルパス ---
         if model_path is None:
-            model_path = Path("/gs/bs/tga-satolab-gtex/yamauchi/SHAPEtransformer/logs/5136586/train/epoch-20.pth")
+            model_path = Path("/gs/bs/tga-satolab-gtex/yamauchi/SHAPEtransformer/logs/Collection/model.pth")
 
         # --- チェックポイント読み込み（安全モード優先） ---
         try:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+import sys
 import time
 from argparse import Namespace
 from collections import defaultdict
@@ -35,7 +36,6 @@ try:
     from torch.utils.tensorboard.writer import SummaryWriter
 except ImportError:
     pass
-
 
 class Train(Common):
     step: int = 0
@@ -105,14 +105,57 @@ class Train(Common):
                     else:
                         loss.backward()
 
+                    # --- DEBUG: which params have no grad, top-k grad norms, snapshot params (before step) ---
+                    try:
+                        no_grad_names = [name for name, p in model.named_parameters() if p.requires_grad and p.grad is None]
+                        logging.info(f"[DBG] params without grad ({len(no_grad_names)}): {no_grad_names[:20]}")
+                        # top-k grads
+                        grads = [(name, float(p.grad.detach().norm().item())) for name, p in model.named_parameters() if p.requires_grad and p.grad is not None]
+                        grads.sort(key=lambda x: x[1], reverse=True)
+                        logging.info(f"[DBG] top grads: {grads[:10]}")
+                        # snapshot params for update check
+                        params_before = {name: p.detach().cpu().clone() for name, p in model.named_parameters() if p.requires_grad}
+                    except Exception:
+                        logging.exception("DBG: failed per-param grad snapshot")
+
+                    # DEBUG: backward 直後の勾配ノルム、未設定勾配数、学習率表示
+                    try:
+                        max_grad = 0.0
+                        zero_grad_count = 0
+                        total_params = 0
+                        for p in model.parameters():
+                            if p.requires_grad:
+                                total_params += 1
+                                if p.grad is None:
+                                    zero_grad_count += 1
+                                else:
+                                    ng = float(p.grad.detach().norm().item())
+                                    if ng > max_grad:
+                                        max_grad = ng
+                        lrs = [g.get('lr') for g in optimizer.param_groups]
+                        logging.info(f"after backward: max_grad={max_grad:.6g} zero_grad_params={zero_grad_count}/{total_params} lrs={lrs}")
+                    except Exception:
+                        logging.exception("Failed to compute grad diagnostics")
+
+                    # DEBUG: per-parameter grad norms と params の snapshot (before step)
+                    try:
+                        params_before = {}
+                        for name, p in model.named_parameters():
+                            if p.requires_grad:
+                                gnorm = 0.0 if p.grad is None else float(p.grad.detach().norm().item())
+                                logging.debug(f"[DBG_PARAM_GRAD] {name} grad_norm={gnorm:.6g}")
+                                params_before[name] = p.detach().cpu().clone()
+                    except Exception:
+                        logging.exception("Failed per-param grad logging / snapshot")
+
                     # --- grad check for shape_model (only Implicit_MLE task) ---
-                    # if isinstance(loss_fn, dict) and 'SHAPE' in loss_fn:
-                    #     sm_list = getattr(loss_fn['SHAPE'], "shape_model", None)
-                    #     if sm_list is not None:
-                    #         for i, sm in enumerate(sm_list):
-                    #             for n, p in sm.named_parameters():
-                    #                 grad_mean = None if p.grad is None else p.grad.abs().mean().item()
-                    #                 print(f"[grad-check] shape_model[{i}].{n} grad={grad_mean}")
+                    if isinstance(loss_fn, dict) and 'SHAPE' in loss_fn:
+                        sm_list = getattr(loss_fn['SHAPE'], "shape_model", None)
+                        if sm_list is not None:
+                            for si, sm in enumerate(sm_list):
+                                for n, p in sm.named_parameters():
+                                    gnorm = None if p.grad is None else float(p.grad.detach().norm().item())
+                                    logging.info(f"[grad-check] shape_model[{si}].{n} grad_norm={gnorm}")
 
 
                     # Gradient clipping with unscaling if using mixed precision
@@ -130,6 +173,18 @@ class Train(Common):
                         scaler.update()
                     else:
                         optimizer.step()
+
+                    # --- DEBUG: per-param update norms (after step) ---
+                    try:
+                        small_updates = []
+                        for name, p in model.named_parameters():
+                            if p.requires_grad and name in params_before:
+                                updn = float((p.detach().cpu() - params_before[name]).norm().item())
+                                if updn < 1e-12:
+                                    small_updates.append((name, updn))
+                        logging.info(f"[DBG] small updates count={len(small_updates)} examples={small_updates[:10]}")
+                    except Exception:
+                        logging.exception("DBG: failed per-param update logging")
 
                     
                     # # バッチ単位の情報は標準出力へ出す（ジョブの .o に流れる）。
@@ -311,6 +366,7 @@ class Train(Common):
         if shape_model is not None:
             for sm in shape_model:
                 optim_params.append({'params': sm.parameters(), 'lr': lr, 'weight_decay': l2_weight})
+                # optim_params.append({'params': sm.parameters(), 'lr': lr*0.1, 'weight_decay': l2_weight})
         
         if optimizer == 'Adam':
             return optim.Adam(optim_params, amsgrad=False)
@@ -354,7 +410,7 @@ class Train(Common):
 
 
     def build_shape_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace,
-                                shape_model: Optional[nn.Module] = None) -> nn.Module:
+                                  shape_model: Optional[nn.Module] = None) -> nn.Module:
         if loss_func == 'shape_nll':
             from .loss.shape_nll_loss import ShapeNLLLoss
             return ShapeNLLLoss(model=model,
@@ -371,9 +427,9 @@ class Train(Common):
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight,
                             sl_weight=args.score_loss_weight)
 
-        if loss_func == 'shape_mse':
-            from .loss.shape_mse_loss import ShapeMSELoss
-            return ShapeMSELoss(model=model,
+        if loss_func == 'shape_cls':
+            from .loss.shape_cls_loss import ShapeCLSLoss
+            return ShapeCLSLoss(model=model,
                             shape_model=shape_model,
                             perturb=args.shape_perturb, nu=args.shape_nu, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight,
@@ -438,10 +494,14 @@ class Train(Common):
         else:
             os.makedirs("logs", exist_ok=True)
             self.log_file = os.path.join("logs", "loss.log")
-        # ファイルをリセット
-        with open(self.log_file, "w") as f:
-            # 追加列: step, alloc_mb,
-            f.write("epoch,phase,loss,time,step,alloc_mb\n")
+        # 追記モードで開き、ファイルが空ならヘッダーを書き込む（既存ログがあれば追記のみ）
+        write_header = True
+        if os.path.exists(self.log_file) and os.path.getsize(self.log_file) > 0:
+            write_header = False
+        with open(self.log_file, "a") as f:
+            if write_header:
+                # 追加列: step, alloc_mb
+                f.write("epoch,phase,loss,time,step,alloc_mb\n")
 
         # train_dataset = BPseqDataset(args.input)
         # if args.shape is not None:
@@ -527,6 +587,22 @@ class Train(Common):
         else: 
             optimizer = self.build_optimizer(args.optimizer, model, args.lr, args.l2_weight, shape_model=shape_model)
 
+        # DEBUG: optimizer param groups info (counts / trainable) と fold モデルの trainable パラメータ数
+        try:
+            total_params = 0
+            total_trainable = 0
+            for i, g in enumerate(optimizer.param_groups):
+                cnt = sum(p.numel() for p in g['params'])
+                cnt_train = sum(p.numel() for p in g['params'] if p.requires_grad)
+                total_params += cnt
+                total_trainable += cnt_train
+                logging.info(f"opt group {i}: lr={g.get('lr')} params={cnt} trainable={cnt_train}")
+            logging.info(f"optimizer total params={total_params} total_trainable={total_trainable}")
+            fold_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            logging.info(f"fold model trainable params={fold_trainable}")
+        except Exception:
+            logging.exception("Failed to log optimizer / model param info")
+
         loss_fn = {
             'BPSEQ': self.build_loss_function(args.loss_func, model, args), 
             'SHAPE': self.build_shape_loss_function(args.shape_loss_func, model, args, shape_model=shape_model), 
@@ -590,7 +666,6 @@ class Train(Common):
             self.save_config(args.save_config, config)
         
         #return self.model
-
 
     @classmethod
     def add_args(cls, parser):
@@ -682,7 +757,7 @@ class Train(Common):
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
         # gparser.add_argument('--shape-model', choices=('Wu', 'Foo', 'MLP'), default='Wu',
         #                     help="shape model nll->Wu, Foo, MSE-> MLP (default: Wu)")
-        gparser.add_argument('--shape-loss-func', choices=('shape_nll', 'shape_fy', 'shape_mse'), default='shape_nll',
+        gparser.add_argument('--shape-loss-func', choices=('shape_nll', 'shape_fy', 'shape_cls'), default='shape_nll',
                             help="loss fuction for SHAPE training data (default: shape)")
         gparser.add_argument('--shape-perturb', type=float, default=0.1,
                             help='standard deviation of perturbation for shape loss (default: 0.1)')

@@ -201,6 +201,6 @@ class Common:
                             default='Folding',
                             help="Task type: 'Folding', 'Assisted_Folding (only predict)', or 'Multitask', 'Implicit_MLE' Multitask->input,--shapeが同じRNA, Implicit_MLE->違うRNA")
 
-        gparser.add_argument('--shape-model', choices=('Wu', 'Foo', 'MLP', 'External'), default='Wu',
-                            help="shape model nll->Wu, Foo, MSE-> MLP, External (default: Wu)")
+        gparser.add_argument('--shape-model', choices=('Wu', 'Foo', 'External', 'ShapeTransformer',"ShapeConv", 'RiboEM'),
+                            help="shape model nll->Wu,Foo,RiboEM, class-> ShapeTransformer, ShapeConv, External ")
 

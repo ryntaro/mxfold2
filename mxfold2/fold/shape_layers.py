@@ -109,3 +109,64 @@ class Foo(nn.Module):
                             + self.unpaired_dist.log_prob(t) * (1-p))
             nlls.append(nll)
         return torch.stack(nlls)
+
+
+class RiboEM(nn.Module):
+    """
+    log1p 空間での 2 成分ガウス（paired / unpaired）から尤度を計算するクラス。
+    Wu と同じ forward(seq, paired, targets) シグネチャを持ち、初期値をここに直接指定します。
+    """
+    def __init__(self,
+                 mu_u: float = 0.36248604585583205,
+                 sig_u: float = 0.3004844655699528,
+                 mu_p: float = 0.0,
+                 sig_p: float = 0.10) -> None:
+        super(RiboEM, self).__init__()
+        # Wu と同じくパラメータを nn.Parameter として保持（必要に応じて学習可能に）
+        self.mu_u = nn.Parameter(torch.tensor(mu_u))
+        self.sig_u = nn.Parameter(torch.tensor(sig_u))
+        self.mu_p = nn.Parameter(torch.tensor(mu_p))
+        self.sig_p = nn.Parameter(torch.tensor(sig_p))
+
+    def forward(self, seq: list[str], paired: list[torch.tensor], targets: list[torch.Tensor]):
+        # 安定化のため clamp（Wu と同様の扱い）
+        self.sig_u.data.clamp_(min=1e-6, max=10.0)
+        self.sig_p.data.clamp_(min=1e-6, max=10.0)
+        self.mu_u.data.clamp_(min=-10.0, max=10.0)
+        self.mu_p.data.clamp_(min=-10.0, max=10.0)
+
+        nlls = []
+        two_pi = torch.tensor(2.0 * np.pi)
+
+        for i in range(len(seq)):
+            # Wu と同じ基準で無効値を除外
+            valid = targets[i] > -2
+            t = targets[i][valid]
+            if t.numel() == 0:
+                nlls.append(torch.tensor(0.0, device=self.mu_u.device))
+                continue
+            p = paired[i][valid].to(t.dtype)
+
+            device = t.device
+            mu_u = self.mu_u.to(device)
+            sig_u = (self.sig_u.to(device) + 1e-12)
+            mu_p = self.mu_p.to(device)
+            sig_p = (self.sig_p.to(device) + 1e-12)
+
+            z = torch.log1p(t)
+
+            log_const_u = -0.5 * torch.log(two_pi.to(device)) - torch.log(sig_u)
+            log_pdf_u = log_const_u - 0.5 * ((z - mu_u) / sig_u) ** 2
+
+            log_const_p = -0.5 * torch.log(two_pi.to(device)) - torch.log(sig_p)
+            log_pdf_p = log_const_p - 0.5 * ((z - mu_p) / sig_p) ** 2
+
+            nll = -torch.mean(log_pdf_u * (1 - p) + log_pdf_p * p)
+            nlls.append(nll)
+
+        if torch.isnan(torch.stack(nlls)).any():
+            logging.error("[NaN detected in RiboEM batch]")
+            logging.error(f"mu_u={self.mu_u.item():.4f}, sig_u={self.sig_u.item():.4f}, "
+                          f"mu_p={self.mu_p.item():.4f}, sig_p={self.sig_p.item():.4f}")
+
+        return torch.stack(nlls)

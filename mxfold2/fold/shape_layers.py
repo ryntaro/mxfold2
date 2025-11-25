@@ -54,9 +54,9 @@ class Wu(nn.Module):
 
         nlls = []
         for i in range(len(seq)):
-            # valid = targets[i] > -1 # to ignore missing values (-999)
-            valid = targets[i] > 0 # to ignore missing values (-999)
-            t = targets[i][valid].clip(min=1e-2, max=3.)
+            valid = targets[i] > -1 # to ignore missing values (-999)
+            # valid = targets[i] > 0 # to ignore missing values (-999)
+            t = targets[i][valid].clip(min=1e-2, max=1.)
             p = paired[i][valid]
 
             nll = -torch.mean(self.paired_dist.log_prob(t) * p 
@@ -170,3 +170,258 @@ class RiboEM(nn.Module):
                           f"mu_p={self.mu_p.item():.4f}, sig_p={self.sig_p.item():.4f}")
 
         return torch.stack(nlls)
+
+
+class ContraSE(nn.Module):
+    """
+    Base-specific Gamma parameters hardcoded from EternaFoldParams_PLUS_POTENTIALS.v1.
+
+    Mapping:
+      - k -> k (Eterna の k, ここではパラメータ名に k を使う)
+      - theta -> theta (Eterna の theta, ここではパラメータ名に theta を使う)
+      - suffix 0 = paired, 1 = unpaired
+    """
+    def __init__(self) -> None:
+        super().__init__()
+        from collections import OrderedDict
+        import math
+
+        # Values taken from EternaFoldParams_PLUS_POTENTIALS.v1 (embedded)
+        eterna_vals = {
+            "A": {"k0": 0.3146640447, "k1": 0.997568854,  "th0": -2.118602351, "th1": -0.9497727393},
+            "C": {"k0": 0.4536549189, "k1": 0.7960273654, "th0": -2.525121753, "th1": -1.598290642},
+            "G": {"k0": 0.3607764847, "k1": 0.7175884215, "th0": -2.065437383, "th1": -0.9349060146},
+            "U": {"k0": 0.3820697829, "k1": 0.6217085081, "th0": -2.391501329, "th1": -0.8960615316},
+        }
+
+        self.bases = ["A", "U", "G", "C"]
+        params = OrderedDict()
+        for b in self.bases:
+            ev = eterna_vals[b]
+            # suffix 0 -> paired, suffix 1 -> unpaired
+            p_k = float(ev["k0"])
+            p_theta = float(ev["th0"])
+            u_k = float(ev["k1"])
+            u_theta = float(ev["th1"])
+
+            # store as nn.Parameter with names using k/theta
+            params[f"p_{b}_k"] = nn.Parameter(torch.tensor(p_k, dtype=torch.float32))
+            params[f"p_{b}_theta"]  = nn.Parameter(torch.tensor(p_theta, dtype=torch.float32))
+            params[f"u_{b}_k"] = nn.Parameter(torch.tensor(u_k, dtype=torch.float32))
+            params[f"u_{b}_theta"]  = nn.Parameter(torch.tensor(u_theta, dtype=torch.float32))
+
+        self.params = nn.ParameterDict(params)
+
+    def forward(self, seq: list[str], paired: list[torch.tensor], targets: list[torch.Tensor]):
+        # clamp parameters for stability
+        for name, p in self.params.items():
+            # k should be positive-ish, theta can be negative; clamp magnitudes
+            if name.endswith("_k"):
+                p.data.clamp_(min=1e-6, max=50.0)
+            else:
+                p.data.clamp_(min=-10.0, max=10.0)
+
+        device = next(self.params.values()).device
+        nlls = []
+
+        for i in range(len(seq)):
+            valid = targets[i] > -1
+            if not valid.any():
+                nlls.append(torch.tensor(0.0, device=device))
+                continue
+
+            t = targets[i][valid].clip(min=1e-3, max=3.0).to(device)
+            p_mask = paired[i][valid].to(t.dtype).to(device)
+
+            # indices of valid positions
+            idxs = torch.where(valid)[0].cpu().numpy().tolist()
+            # handle possible targets with leading dummy (len = L+1)
+            seq_i = seq[i]
+            if len(targets[i]) == len(seq_i) + 1:
+                bases_at_valid = [seq_i[j-1] if j > 0 else "N" for j in idxs]
+            else:
+                bases_at_valid = [seq_i[j] for j in idxs]
+
+            total_logp = torch.tensor(0.0, device=device)
+            total_count = 0
+
+            for b in self.bases:
+                # positions of this base
+                idx_list = [k for k, ch in enumerate(bases_at_valid) if ch.upper() == b]
+                if not idx_list:
+                    continue
+                idx_tensor = torch.tensor(idx_list, dtype=torch.long, device=device)
+                t_b = t[idx_tensor]
+                p_b = p_mask[idx_tensor]
+
+                # read k and theta, convert to Gamma params: alpha = k, beta = exp(-theta)
+                k_p = self.params[f"p_{b}_k"].to(device)
+                th_p = self.params[f"p_{b}_theta"].to(device)
+                k_u = self.params[f"u_{b}_k"].to(device)
+                th_u = self.params[f"u_{b}_theta"].to(device)
+
+                pa = k_p
+                pb = torch.exp(-th_p)  # convert theta -> positive rate
+                ua = k_u
+                ub = torch.exp(-th_u)
+
+                paired_dist = torch.distributions.Gamma(pa, pb)
+                unpaired_dist = torch.distributions.Gamma(ua, ub)
+
+                logp_b = paired_dist.log_prob(t_b) * p_b + unpaired_dist.log_prob(t_b) * (1.0 - p_b)
+                total_logp = total_logp + torch.sum(logp_b)
+                total_count += t_b.numel()
+
+            if total_count == 0:
+                nlls.append(torch.tensor(0.0, device=device))
+            else:
+                nll = - (total_logp / float(total_count))
+                nlls.append(nll)
+
+        # NaN チェック
+        st = torch.stack(nlls)
+        if torch.isnan(st).any():
+            logging.error("[NaN detected in ContraSE batch]")
+            # log k/theta values for debugging
+            debug_vals = {k: float(v.item()) for k, v in self.params.items()}
+            logging.error(debug_vals)
+        return st
+
+
+class Helix(nn.Module):
+    """
+    Helix context model.
+
+    Context names (ユーザ指定):
+      1: stacking  (i と i+1 が互いにペア)
+      2: unpair    (i, i+1 ともにアンペア)
+      3: opening   (i がアンペアで i+1 がペア)
+      4: closing   (i がペアで i+1 がアンペア)
+
+    Paired -> GEV(xi, mu, sigma)
+    Unpaired -> Gamma(alpha, beta)
+
+    optional wu_params を渡すと Wu のパラメータ値を直接使う（Wu モジュールは生成しない）。
+    wu_params のキー: xi, mu, sigma, alpha, beta
+    """
+    def __init__(self, wu_params: dict | None = None) -> None:
+        super().__init__()
+        from collections import OrderedDict
+
+        # contexts
+        self.ctx_names = ["stacking", "unpair", "opening", "closing"]
+
+        # デフォルト値（Wu の既知のデフォルトを用意）
+        default_gev = {"xi": 0.774, "mu": 0.078, "sigma": 0.083}
+        default_gamma = {"alpha": 1.006, "beta": 1.404}
+
+        wp = wu_params or {}
+        gev_vals = {
+            "xi": float(wp.get("xi", default_gev["xi"])),
+            "mu": float(wp.get("mu", default_gev["mu"])),
+            "sigma": float(wp.get("sigma", default_gev["sigma"])),
+        }
+        gamma_vals = {
+            "alpha": float(wp.get("alpha", default_gamma["alpha"])),
+            "beta": float(wp.get("beta", default_gamma["beta"])),
+        }
+
+        params = OrderedDict()
+        # 各コンテキストごとに paired は GEV パラメータ、unpaired は Gamma パラメータを持つ
+        for ctx in self.ctx_names:
+            params[f"{ctx}_p_xi"] = nn.Parameter(torch.tensor(gev_vals["xi"], dtype=torch.float32))
+            params[f"{ctx}_p_mu"] = nn.Parameter(torch.tensor(gev_vals["mu"], dtype=torch.float32))
+            params[f"{ctx}_p_sigma"] = nn.Parameter(torch.tensor(gev_vals["sigma"], dtype=torch.float32))
+            params[f"{ctx}_u_alpha"] = nn.Parameter(torch.tensor(gamma_vals["alpha"], dtype=torch.float32))
+            params[f"{ctx}_u_beta"] = nn.Parameter(torch.tensor(gamma_vals["beta"], dtype=torch.float32))
+
+        self.params = nn.ParameterDict(params)
+
+    def forward(self, seq: list[str], paired: list[torch.tensor], targets: list[torch.Tensor]):
+        # clamp for stability
+        for name, p in self.params.items():
+            if name.endswith("_p_xi"):
+                p.data.clamp_(min=1e-3, max=5.0)
+            elif name.endswith("_p_sigma"):
+                p.data.clamp_(min=1e-6, max=5.0)
+            elif name.endswith("_p_mu"):
+                p.data.clamp_(min=-10.0, max=10.0)
+            elif name.endswith("_u_alpha"):
+                p.data.clamp_(min=1e-6, max=50.0)
+            elif name.endswith("_u_beta"):
+                p.data.clamp_(min=1e-6, max=50.0)
+
+        device = next(self.params.values()).device
+        nlls = []
+
+        for idx in range(len(seq)):
+            seq_i = seq[idx]
+            L = len(seq_i)
+            targ_full = targets[idx]
+            paired_full = paired[idx]
+
+            offset = 1 if len(targ_full) == L + 1 else 0
+
+            total_logp = torch.tensor(0.0, device=device)
+            total_count = 0
+
+            for i in range(0, L - 1):
+                ti = i + offset
+                ti1 = i + 1 + offset
+                if ti >= len(targ_full) or ti1 >= len(targ_full):
+                    continue
+                if not (targ_full[ti] > -1):
+                    continue
+
+                t = targ_full[ti].clip(min=1e-3, max=3.0).to(device)
+
+                p_i_raw = paired_full[ti]
+                p_i1_raw = paired_full[ti1]
+
+                if torch.is_floating_point(p_i_raw):
+                    is_p_i = float(p_i_raw.item()) > 0.5
+                    is_p_i1 = float(p_i1_raw.item()) > 0.5
+                    stacking = is_p_i and is_p_i1 and False
+                else:
+                    p_i_idx = int(p_i_raw.item())
+                    p_i1_idx = int(p_i1_raw.item())
+                    is_p_i = p_i_idx != 0
+                    is_p_i1 = p_i1_idx != 0
+                    stacking = (p_i_idx == (i + 2)) and (p_i1_idx == (i + 1))
+
+                if stacking:
+                    ctx = "stacking"
+                elif (not is_p_i) and (not is_p_i1):
+                    ctx = "unpair"
+                elif (not is_p_i) and is_p_i1:
+                    ctx = "opening"
+                else:
+                    ctx = "closing"
+
+                if is_p_i:
+                    # paired -> GEV
+                    xi = self.params[f"{ctx}_p_xi"].to(device)
+                    mu = self.params[f"{ctx}_p_mu"].to(device)
+                    sigma = self.params[f"{ctx}_p_sigma"].to(device)
+                    gev = GeneralizedExtremeValue(xi, mu, sigma)
+                    logp = gev.log_prob(t)
+                else:
+                    # unpaired -> Gamma
+                    a = self.params[f"{ctx}_u_alpha"].to(device)
+                    b = self.params[f"{ctx}_u_beta"].to(device)
+                    dist = Gamma(a, b)
+                    logp = dist.log_prob(t)
+
+                total_logp = total_logp + logp
+                total_count += 1
+
+            if total_count == 0:
+                nlls.append(torch.tensor(0.0, device=device))
+            else:
+                nlls.append(- (total_logp / float(total_count)))
+
+        st = torch.stack(nlls)
+        if torch.isnan(st).any():
+            logging.error("[NaN detected in Helix]")
+            logging.error({k: float(v.item()) for k, v in self.params.items()})
+        return st

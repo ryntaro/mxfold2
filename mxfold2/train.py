@@ -365,8 +365,8 @@ class Train(Common):
         ]
         if shape_model is not None:
             for sm in shape_model:
-                optim_params.append({'params': sm.parameters(), 'lr': lr, 'weight_decay': l2_weight})
-                # optim_params.append({'params': sm.parameters(), 'lr': lr*0.1, 'weight_decay': l2_weight})
+                # optim_params.append({'params': sm.parameters(), 'lr': lr, 'weight_decay': l2_weight})
+                optim_params.append({'params': sm.parameters(), 'lr': lr*0.1, 'weight_decay': l2_weight})
         
         if optimizer == 'Adam':
             return optim.Adam(optim_params, amsgrad=False)
@@ -557,6 +557,13 @@ class Train(Common):
         model, config = self.build_model(args)
         config.update({ 'model': args.model, 'param': args.param, 'fold': args.fold })
 
+        # 生成直後に config を保存（指定があれば）。出力先ディレクトリがなければ作成する。
+        if args.save_config is not None:
+            # save_dir = os.path.dirname(args.save_config)
+            # if save_dir:
+            #     os.makedirs(save_dir, exist_ok=True)
+            self.save_config(args.save_config, config)
+        
         shape_model = None 
         if args.task == "Implicit_MLE":
             shape_model = [ build_shape_model(args) for _ in args.shape ]
@@ -664,7 +671,7 @@ class Train(Common):
             torch.save((swa_model or model).state_dict(), args.param)
         if args.save_config is not None:
             self.save_config(args.save_config, config)
-        
+
         #return self.model
 
     @classmethod

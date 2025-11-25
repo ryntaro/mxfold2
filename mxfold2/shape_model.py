@@ -28,5 +28,14 @@ def build_shape_model(args: Namespace) -> nn.Module:
                             sig_u=0.3004844655699528,
                             mu_p=0.0,
                             sig_p=0.10)
+    elif args.shape_model == 'ContraSE':
+        from .fold.shape_layers import ContraSE
+        # デフォルトコンストラクタを使う。必要なら args でパラメータを渡す実装に拡張してください。
+        return ContraSE()
+
+    elif args.shape_model == 'Helix':
+        from .fold.shape_layers import Helix
+        # デフォルト初期値の Helix を返す
+        return Helix()
     else:
         raise ValueError(f'not implemented: {args.shape_model}')

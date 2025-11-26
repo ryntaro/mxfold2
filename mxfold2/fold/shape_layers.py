@@ -260,10 +260,11 @@ class ContraSE(nn.Module):
                 k_u = self.params[f"u_{b}_k"].to(device)
                 th_u = self.params[f"u_{b}_theta"].to(device)
 
-                pa = k_p
-                pb = torch.exp(-th_p)  # convert theta -> positive rate
-                ua = k_u
-                ub = torch.exp(-th_u)
+                # 新仕様: alpha = exp(k), beta = exp(theta)
+                pa = torch.exp(k_p)
+                pb = torch.exp(th_p)
+                ua = torch.exp(k_u)
+                ub = torch.exp(th_u)
 
                 paired_dist = torch.distributions.Gamma(pa, pb)
                 unpaired_dist = torch.distributions.Gamma(ua, ub)

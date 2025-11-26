@@ -351,22 +351,18 @@ class Train(Common):
 
     def build_optimizer(self, optimizer: str, model: AbstractFold, lr: float, l2_weight: float,
                         shape_model: Optional[list[nn.Module]] = None) -> optim.Optimizer:
-        # if hasattr(model, 'zuker') and hasattr(model, 'turner'):
-        #     optim_params = [
-        #         {'params': model.zuker.parameters(), 'lr': lr, 'weight_decay': l2_weight},
-        #         {'params': model.turner.parameters(), 'lr': lr*10, 'weight_decay': l2_weight/10},
-        #     ]
-        # else:
-        #     optim_params = [
-        #         {'params': model.parameters(), 'lr': lr, 'weight_decay': l2_weight},
-        #     ]
-        optim_params = [
-            {'params': model.parameters(), 'lr': lr, 'weight_decay': l2_weight},
-        ]
+        # only include parameters that require gradients (respect freeze)
+        optim_params = []
+        model_params = [p for p in model.parameters() if p.requires_grad]
+        if model_params:
+            optim_params.append({'params': model_params, 'lr': lr, 'weight_decay': l2_weight})
         if shape_model is not None:
             for sm in shape_model:
-                # optim_params.append({'params': sm.parameters(), 'lr': lr, 'weight_decay': l2_weight})
-                optim_params.append({'params': sm.parameters(), 'lr': lr*0.1, 'weight_decay': l2_weight})
+                sm_params = [p for p in sm.parameters() if p.requires_grad]
+                if sm_params:
+                    optim_params.append({'params': sm_params, 'lr': lr*0.1, 'weight_decay': l2_weight})
+        if len(optim_params) == 0:
+            raise RuntimeError("No trainable parameters found after freeze (all params frozen?)")
         
         if optimizer == 'Adam':
             return optim.Adam(optim_params, amsgrad=False)
@@ -586,6 +582,61 @@ class Train(Common):
                 for sm in shape_model:
                     sm.to(torch.device("cuda", args.gpu))
 
+        # --- Freeze specified high-level components (encoder, fc_paired) ---
+        if hasattr(args, 'freeze') and args.freeze:
+            keys = []
+            for item in args.freeze:
+                for k in item.split(','):
+                    k = k.strip()
+                    if k:
+                        keys.append(k)
+
+            # try to find the network module (handles model.zuker.net or model.net)
+            net = None
+            if hasattr(model, 'zuker') and hasattr(model.zuker, 'net'):
+                net = model.zuker.net
+            elif hasattr(model, 'net'):
+                net = model.net
+            else:
+                net = model
+
+            def _freeze_module(m: Optional[nn.Module]) -> bool:
+                if m is None:
+                    return False
+                for p in m.parameters():
+                    p.requires_grad = False
+                return True
+
+            applied = []
+            if 'encoder' in keys:
+                if hasattr(net, 'encoder'):
+                    _freeze_module(getattr(net, 'encoder'))
+                    applied.append('encoder')
+                else:
+                    logging.warning("freeze requested: 'encoder' not found on model")
+            if 'fc_paired' in keys:
+                if hasattr(net, 'fc_paired'):
+                    _freeze_module(getattr(net, 'fc_paired'))
+                    applied.append('fc_paired')
+                else:
+                    logging.warning("freeze requested: 'fc_paired' not found on model")
+
+            # fallback: if a key appears in parameter names, freeze those params
+            for k in keys:
+                if k in ('encoder','fc_paired'):
+                    continue
+                matched = False
+                for name, p in model.named_parameters():
+                    if k in name:
+                        p.requires_grad = False
+                        matched = True
+                if matched:
+                    applied.append(k)
+
+            total = sum(p.numel() for p in model.parameters())
+            trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            logging.info(f"Freeze keys={keys} applied={applied}. trainable params={trainable}/{total}")
+
         torch.set_num_threads(args.threads)
         interface.set_num_threads(args.threads)
 
@@ -693,6 +744,8 @@ class Train(Common):
         subparser.add_argument('--init-param', type=str, default='',
                             help='the file name of the initial parameters')
         subparser.add_argument('--shape', type=str, action='append', help='specify the file name that includes SHAPE reactivity')
+        subparser.add_argument('--freeze', type=str, action='append',
+                               help='freeze components for fine-tuning(Not --resume, but --init-param). repeatable or comma-separated. supported keys: encoder,fc_paired')
         # subparser.add_argument('--shape-intercept', type=float, default=-0.8,
         #                     help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
         # subparser.add_argument('--shape-slope', type=float, default=2.6, 

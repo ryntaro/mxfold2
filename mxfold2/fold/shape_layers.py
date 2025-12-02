@@ -10,6 +10,22 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Gamma
 
+def _mask_and_clip_targets(t: torch.Tensor, min_val: float = 0.01, max_val: float = 1.0):
+    """
+    共通処理:
+      - t の要素ごとに t < -1 は invalid (False) とする（スルー）
+      - それ以外は [min_val, max_val] に clip する
+    戻り値: (valid_mask (bool tensor), clipped_tensor)
+    """
+    # assume t is a torch.Tensor (as used in callers). make a safe clone to avoid in-place issues
+    if not torch.is_tensor(t):
+        t = torch.tensor(t)
+    t = t.clone()
+    valid = t > -1
+    # clip entire tensor (clipped values will be ignored where valid is False)
+    clipped = torch.clamp(t, min=min_val, max=max_val)
+    return valid, clipped
+
 
 class GeneralizedExtremeValue(torch.autograd.Function):
     def __init__(self, 
@@ -45,28 +61,25 @@ class Wu(nn.Module):
 
 
     def forward(self, seq: list[str], paired: list[torch.tensor], targets: list[torch.Tensor]):
-
         self.xi.data.clamp_(min=1e-2, max=2.0)
         self.sigma.data.clamp_(min=1e-2, max=2.0)
         self.mu.data.clamp_(min=1e-2, max=2.0)
         self.alpha.data.clamp_(min=1e-2, max=5.0)
         self.beta.data.clamp_(min=1e-2, max=5.0)
 
+        device = self.xi.device
+
         nlls = []
         for i in range(len(seq)):
-            valid = targets[i] > -1 # to ignore missing values (-999)
-            # valid = targets[i] > 0 # to ignore missing values (-999)
-            t = targets[i][valid].clip(min=1e-2, max=1.)
-            p = paired[i][valid]
+            valid, t_all = _mask_and_clip_targets(targets[i], min_val=0.01, max_val=1.0)
+            if not valid.any():
+                nlls.append(torch.tensor(0.0, device=device))
+                continue
+            t = t_all[valid].to(device)
+            p = paired[i][valid].to(t.dtype).to(device)
 
-            nll = -torch.mean(self.paired_dist.log_prob(t) * p 
-                            + self.unpaired_dist.log_prob(t) * (1-p))
-            # nll1 = self.paired_dist.log_prob(t) * p
-            # print('nll1', nll1)
-            # nll2 =self.unpaired_dist.log_prob(t) * (1-p)
-            # print('nll2', nll2)
-            # nll = -torch.mean(nll1 + nll2)
-            
+            nll = -torch.mean(self.paired_dist.log_prob(t) * p
+                              + self.unpaired_dist.log_prob(t) * (1 - p))
             nlls.append(nll)
         
         # --- 配列単位で NaN チェック ---
@@ -77,7 +90,6 @@ class Wu(nn.Module):
             # logging.error(f"nlls={nlls.detach().cpu().numpy()}")
 
         return torch.stack(nlls)
-
 
 class Foo(nn.Module):
     def __init__(self,  
@@ -94,83 +106,85 @@ class Foo(nn.Module):
         self.paired_dist = Gamma(self.p_alpha, self.p_beta)
         self.unpaired_dist = Gamma(self.u_alpha, self.u_beta)
 
-
     def forward(self, seq: list[str], paired: list[torch.tensor], targets: list[torch.Tensor]):
-        # self.p_alpha.data.clamp_(min=1e-2)
-        # self.p_beta.data.clamp_(min=1e-2)
-        # self.u_alpha.data.clamp_(min=1e-2)
-        # self.u_beta.data.clamp_(min=1e-2)
-        nlls = []
-        for i in range(len(seq)):
-            valid = targets[i] > -1 # to ignore missing values (-999)
-            t = targets[i][valid].clip(min=1e-2, max=3.)
-            p = paired[i][valid]
-            nll = -torch.mean(self.paired_dist.log_prob(t) * p 
-                            + self.unpaired_dist.log_prob(t) * (1-p))
-            nlls.append(nll)
-        return torch.stack(nlls)
+         self.p_alpha.data.clamp_(min=1e-2)
+         self.p_beta.data.clamp_(min=1e-2)
+         self.u_alpha.data.clamp_(min=1e-2)
+         self.u_beta.data.clamp_(min=1e-2)
 
-
-class RiboEM(nn.Module):
-    """
-    log1p 空間での 2 成分ガウス（paired / unpaired）から尤度を計算するクラス。
-    Wu と同じ forward(seq, paired, targets) シグネチャを持ち、初期値をここに直接指定します。
-    """
-    def __init__(self,
-                 mu_u: float = 0.36248604585583205,
-                 sig_u: float = 0.3004844655699528,
-                 mu_p: float = 0.0,
-                 sig_p: float = 0.10) -> None:
-        super(RiboEM, self).__init__()
-        # Wu と同じくパラメータを nn.Parameter として保持（必要に応じて学習可能に）
-        self.mu_u = nn.Parameter(torch.tensor(mu_u))
-        self.sig_u = nn.Parameter(torch.tensor(sig_u))
-        self.mu_p = nn.Parameter(torch.tensor(mu_p))
-        self.sig_p = nn.Parameter(torch.tensor(sig_p))
-
-    def forward(self, seq: list[str], paired: list[torch.tensor], targets: list[torch.Tensor]):
-        # 安定化のため clamp（Wu と同様の扱い）
-        self.sig_u.data.clamp_(min=1e-6, max=10.0)
-        self.sig_p.data.clamp_(min=1e-6, max=10.0)
-        self.mu_u.data.clamp_(min=-10.0, max=10.0)
-        self.mu_p.data.clamp_(min=-10.0, max=10.0)
-
-        nlls = []
-        two_pi = torch.tensor(2.0 * np.pi)
-
-        for i in range(len(seq)):
-            # Wu と同じ基準で無効値を除外
-            valid = targets[i] > -2
-            t = targets[i][valid]
-            if t.numel() == 0:
-                nlls.append(torch.tensor(0.0, device=self.mu_u.device))
+         nlls = []
+         for i in range(len(seq)):
+            valid, t_all = _mask_and_clip_targets(targets[i], min_val=0.01, max_val=1.0)
+            if not valid.any():
+                nlls.append(torch.tensor(0.0, device=self.p_alpha.device))
                 continue
-            p = paired[i][valid].to(t.dtype)
-
-            device = t.device
-            mu_u = self.mu_u.to(device)
-            sig_u = (self.sig_u.to(device) + 1e-12)
-            mu_p = self.mu_p.to(device)
-            sig_p = (self.sig_p.to(device) + 1e-12)
-
-            z = torch.log1p(t)
-
-            log_const_u = -0.5 * torch.log(two_pi.to(device)) - torch.log(sig_u)
-            log_pdf_u = log_const_u - 0.5 * ((z - mu_u) / sig_u) ** 2
-
-            log_const_p = -0.5 * torch.log(two_pi.to(device)) - torch.log(sig_p)
-            log_pdf_p = log_const_p - 0.5 * ((z - mu_p) / sig_p) ** 2
-
-            nll = -torch.mean(log_pdf_u * (1 - p) + log_pdf_p * p)
+            t = t_all[valid].to(self.p_alpha.device)
+            p = paired[i][valid].to(t.dtype).to(self.p_alpha.device)
+            nll = -torch.mean(self.paired_dist.log_prob(t) * p
+                              + self.unpaired_dist.log_prob(t) * (1 - p))
             nlls.append(nll)
+         return torch.stack(nlls)
 
-        if torch.isnan(torch.stack(nlls)).any():
-            logging.error("[NaN detected in RiboEM batch]")
-            logging.error(f"mu_u={self.mu_u.item():.4f}, sig_u={self.sig_u.item():.4f}, "
-                          f"mu_p={self.mu_p.item():.4f}, sig_p={self.sig_p.item():.4f}")
 
-        return torch.stack(nlls)
+# class RiboEM(nn.Module):
+#     """
+#     log1p 空間での 2 成分ガウス（paired / unpaired）から尤度を計算するクラス。
+#     Wu と同じ forward(seq, paired, targets) シグネチャを持ち、初期値をここに直接指定します。
+#     """
+#     def __init__(self,
+#                  mu_u: float = 0.36248604585583205,
+#                  sig_u: float = 0.3004844655699528,
+#                  mu_p: float = 0.0,
+#                  sig_p: float = 0.10) -> None:
+#         super(RiboEM, self).__init__()
+#         # Wu と同じくパラメータを nn.Parameter として保持（必要に応じて学習可能に）
+#         self.mu_u = nn.Parameter(torch.tensor(mu_u))
+#         self.sig_u = nn.Parameter(torch.tensor(sig_u))
+#         self.mu_p = nn.Parameter(torch.tensor(mu_p))
+#         self.sig_p = nn.Parameter(torch.tensor(sig_p))
 
+#     def forward(self, seq: list[str], paired: list[torch.tensor], targets: list[torch.Tensor]):
+#         # 安定化のため clamp（Wu と同様の扱い）
+#         self.sig_u.data.clamp_(min=1e-6, max=10.0)
+#         self.sig_p.data.clamp_(min=1e-6, max=10.0)
+#         self.mu_u.data.clamp_(min=-10.0, max=10.0)
+#         self.mu_p.data.clamp_(min=-10.0, max=10.0)
+ 
+#         nlls = []
+#         two_pi = torch.tensor(2.0 * np.pi)
+ 
+#         for i in range(len(seq)):
+#             # Wu と同じ基準で無効値を除外 -> 統一処理
+#             valid, t_all = _mask_and_clip_targets(targets[i], min_val=0.01, max_val=1.0)
+#             if not valid.any():
+#                 nlls.append(torch.tensor(0.0, device=self.mu_u.device))
+#                 continue
+#             t = t_all[valid].to(self.mu_u.device)
+#             p = paired[i][valid].to(t.dtype).to(self.mu_u.device)
+
+#             device = t.device
+#             mu_u = self.mu_u.to(device)
+#             sig_u = (self.sig_u.to(device) + 1e-12)
+#             mu_p = self.mu_p.to(device)
+#             sig_p = (self.sig_p.to(device) + 1e-12)
+ 
+#             z = torch.log1p(t)
+
+#             log_const_u = -0.5 * torch.log(two_pi.to(device)) - torch.log(sig_u)
+#             log_pdf_u = log_const_u - 0.5 * ((z - mu_u) / sig_u) ** 2
+
+#             log_const_p = -0.5 * torch.log(two_pi.to(device)) - torch.log(sig_p)
+#             log_pdf_p = log_const_p - 0.5 * ((z - mu_p) / sig_p) ** 2
+
+#             nll = -torch.mean(log_pdf_u * (1 - p) + log_pdf_p * p)
+#             nlls.append(nll)
+
+#         if torch.isnan(torch.stack(nlls)).any():
+#             logging.error("[NaN detected in RiboEM batch]")
+#             logging.error(f"mu_u={self.mu_u.item():.4f}, sig_u={self.sig_u.item():.4f}, "
+#                           f"mu_p={self.mu_p.item():.4f}, sig_p={self.sig_p.item():.4f}")
+
+#         return torch.stack(nlls)
 
 class ContraSE(nn.Module):
     """
@@ -220,22 +234,24 @@ class ContraSE(nn.Module):
                 p.data.clamp_(min=1e-6, max=50.0)
             else:
                 p.data.clamp_(min=-10.0, max=10.0)
-
+ 
         device = next(self.params.values()).device
         nlls = []
-
+ 
+        # unified handling: mask & clip targets per-sample, build bases_at_valid from valid indices,
+        # then compute per-base contributions indexing into the valid-subset tensors.
         for i in range(len(seq)):
-            valid = targets[i] > -1
+            valid, t_all = _mask_and_clip_targets(targets[i], min_val=0.01, max_val=1.0)
             if not valid.any():
                 nlls.append(torch.tensor(0.0, device=device))
                 continue
 
-            t = targets[i][valid].clip(min=1e-3, max=3.0).to(device)
-            p_mask = paired[i][valid].to(t.dtype).to(device)
+            # t_valid is clipped values at valid positions (1D)
+            t_valid = t_all[valid].to(device)
+            p_mask = paired[i][valid].to(t_valid.dtype).to(device)
 
-            # indices of valid positions
+            # map valid indices back to sequence positions to build bases_at_valid
             idxs = torch.where(valid)[0].cpu().numpy().tolist()
-            # handle possible targets with leading dummy (len = L+1)
             seq_i = seq[i]
             if len(targets[i]) == len(seq_i) + 1:
                 bases_at_valid = [seq_i[j-1] if j > 0 else "N" for j in idxs]
@@ -246,25 +262,24 @@ class ContraSE(nn.Module):
             total_count = 0
 
             for b in self.bases:
-                # positions of this base
+                # positions of this base within the valid-subset
                 idx_list = [k for k, ch in enumerate(bases_at_valid) if ch.upper() == b]
                 if not idx_list:
                     continue
                 idx_tensor = torch.tensor(idx_list, dtype=torch.long, device=device)
-                t_b = t[idx_tensor]
+                t_b = t_valid[idx_tensor]
                 p_b = p_mask[idx_tensor]
 
-                # read k and theta, convert to Gamma params: alpha = k, beta = exp(-theta)
+                # read k and theta, convert to Gamma params: alpha = exp(k), beta = exp(theta)
                 k_p = self.params[f"p_{b}_k"].to(device)
                 th_p = self.params[f"p_{b}_theta"].to(device)
                 k_u = self.params[f"u_{b}_k"].to(device)
                 th_u = self.params[f"u_{b}_theta"].to(device)
-
-                # 新仕様: alpha = exp(k), beta = exp(theta)
+                #contrafold-seとpytorchでbetaの定義が違うので注意
                 pa = torch.exp(k_p)
-                pb = torch.exp(th_p)
+                pb = 1.0 / torch.exp(th_p)
                 ua = torch.exp(k_u)
-                ub = torch.exp(th_u)
+                ub = 1.0 / torch.exp(th_u)
 
                 paired_dist = torch.distributions.Gamma(pa, pb)
                 unpaired_dist = torch.distributions.Gamma(ua, ub)
@@ -360,22 +375,23 @@ class Helix(nn.Module):
             L = len(seq_i)
             targ_full = targets[idx]
             paired_full = paired[idx]
-
+ 
             offset = 1 if len(targ_full) == L + 1 else 0
-
+ 
             total_logp = torch.tensor(0.0, device=device)
             total_count = 0
-
+ 
             for i in range(0, L - 1):
                 ti = i + offset
                 ti1 = i + 1 + offset
                 if ti >= len(targ_full) or ti1 >= len(targ_full):
                     continue
-                if not (targ_full[ti] > -1):
+                # 統一処理: use mask-and-clip for this single position
+                valid, t_all = _mask_and_clip_targets(targ_full[ti].unsqueeze(0), min_val=0.01, max_val=1.0)
+                if not valid[0]:
                     continue
-
-                t = targ_full[ti].clip(min=1e-3, max=3.0).to(device)
-
+                t = t_all[0].to(device)
+ 
                 p_i_raw = paired_full[ti]
                 p_i1_raw = paired_full[ti1]
 
@@ -419,10 +435,108 @@ class Helix(nn.Module):
             if total_count == 0:
                 nlls.append(torch.tensor(0.0, device=device))
             else:
-                nlls.append(- (total_logp / float(total_count)))
+                nll = - (total_logp / float(total_count))
+                nlls.append(nll)
 
         st = torch.stack(nlls)
         if torch.isnan(st).any():
             logging.error("[NaN detected in Helix]")
             logging.error({k: float(v.item()) for k, v in self.params.items()})
+        return st
+
+class Corr(nn.Module):
+    """
+    Reactivity と二次構造（paired/unpaired）との相関に基づく損失。
+    - targets に対して _mask_and_clip_targets() を適用して valid positions を選ぶ。
+    - 二次構造は paired ->shape proxy 0.05, unpaired -> 1 として扱う（dot=1, bracket=0）。
+    - 各シーケンスについて Pearson 相関 r を計算し、損失として 1 - r を返す。
+      （valid が無ければ 0 を返す）
+    """
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, seq: list[str], paired: list[torch.tensor], targets: list[torch.Tensor]):
+        import sys
+        device = paired[0].device if len(paired) > 0 else (targets[0].device if len(targets)>0 else torch.device("cpu"))
+        output = []
+        
+        for i in range(len(seq)):
+            valid, t_all = _mask_and_clip_targets(targets[i], min_val=0.01, max_val=1.0)
+            # 基本情報の出力
+            logging.debug("Corr: idx=%d seq_len=%d target_len=%d valid_count=%d",
+                          i, len(seq[i]), int(t_all.numel()), int(valid.sum().item() if hasattr(valid, "sum") else 0))
+
+            if not valid.any():
+                # 問題箇所としてログに詳細を出す（停止せず元の挙動を維持）
+                logging.error("Corr: idx=%d NO VALID POSITIONS. seq='%s'", i, seq[i])
+                try:
+                    logging.error("  t_all (first 50)=%s", t_all.detach().cpu().tolist()[:50])
+                except Exception:
+                    logging.exception("  failed to dump t_all")
+                try:
+                    logging.error("  paired (first 50)=%s", paired[i].detach().cpu().tolist()[:50])
+                except Exception:
+                    logging.exception("  failed to dump paired[i]")
+                print(f"Corr DEBUG idx={i} NO_VALID seq={seq[i]}", file=sys.stderr)
+                output.append(torch.tensor(0.0, device=device))
+                continue
+
+            # 有効位置だけ取り出す
+            t_valid = t_all[valid].to(device).to(torch.float32)
+            p_full = paired[i]
+            p_valid = p_full[valid].to(device).to(torch.float32)
+            # map predicted paired-prob p_valid -> reactivity scale matching sim_shape.fake:
+            # paired (p=1) -> 0.05, unpaired (p=0) -> 1.0
+            shape_proxy = 1.0 - 0.95 * p_valid
+
+            # ここで要素数不足が発生するか確認して詳細出力
+            if shape_proxy.numel() < 2:
+                logging.error("Corr: idx=%d TOO FEW VALID POSITIONS AFTER MASK: num=%d seq='%s'", i, int(shape_proxy.numel()), seq[i])
+                try:
+                    logging.error("  t_valid=%s", t_valid.detach().cpu().tolist())
+                except Exception:
+                    logging.exception("  failed to dump t_valid")
+                try:
+                    logging.error("  p_valid=%s", p_valid.detach().cpu().tolist())
+                except Exception:
+                    logging.exception("  failed to dump p_valid")
+                print(f"Corr DEBUG idx={i} TOO_FEW num={shape_proxy.numel()} seq={seq[i]}", file=sys.stderr)
+                output.append(torch.tensor(0.0, device=device))
+                continue
+
+            # Pearson 相関を計算
+            x = shape_proxy
+            y = t_valid
+            x_mean = torch.mean(x)
+            y_mean = torch.mean(y)
+            xm = x - x_mean
+            ym = y - y_mean
+            cov = torch.mean(xm * ym)
+            x_std = torch.sqrt(torch.mean(xm * xm))
+            y_std = torch.sqrt(torch.mean(ym * ym))
+
+            denom = x_std * y_std
+            # 安定化 eps（dtype/device に合わせる）
+            eps = torch.finfo(denom.dtype).eps * 1e3
+            denom_safe = denom + eps
+            corr_raw = cov / denom_safe
+            # denom が小さいときは fallback（相関未定義） -> loss=1.0 にしたい
+            small_mask = denom <= eps
+            # 勾配経路を保つため p_valid を使ったゼロ（影響はゼロ）
+            fallback_corr = p_valid.sum() * 0.0
+            corr = torch.where(small_mask, fallback_corr, corr_raw)
+            corr = torch.clamp(corr, -1.0, 1.0)
+ 
+            loss = 1.0 - corr
+            # denom が小さい箇所は明示的に最大損失(=1.0)。勾配経路は保つ。
+            loss = torch.where(small_mask, torch.tensor(1.0, device=device, dtype=loss.dtype) + (p_valid.sum()*0.0), loss + (p_valid.sum()*0.0))
+            output.append(loss)
+
+        st = torch.stack(output)
+        if torch.isnan(st).any():
+            logging.error("[NaN detected in Corr]")
+            try:
+                logging.error(f"1-Corr={st.detach().cpu().numpy()}")
+            except Exception:
+                logging.exception("failed to dump 1-Corr")
         return st

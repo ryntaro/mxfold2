@@ -73,10 +73,26 @@ class ShapeNLLLoss(nn.Module):
         for p in paired:
             p.grad = None
 
+        # grads を絶対値で正規化: max_abs = max_i max(|grads[i]|)
+        valid_grads = [g for g in grads if isinstance(g, torch.Tensor) and g.numel() > 0]
+        if len(valid_grads) > 0:
+            max_vals = [g.abs().max() for g in valid_grads]
+            max_abs = torch.stack(max_vals).max()
+            # 安全策：ゼロに近い場合は 1.0 を使う
+            if max_abs.item() == 0.0:
+                max_abs = torch.tensor(1.0, device=max_abs.device, dtype=max_abs.dtype)
+        else:
+            max_abs = torch.tensor(1.0, device=pred.device, dtype=torch.float32)
+
+        # pseudoenergy = nu * g / max_abs
+        pseudo_list = [ (self.nu * g / max_abs) for g in grads ]
+
+        # pseudo_list = [ (self.nu * g) for g in grads ]
+
         ref: torch.Tensor
         ref_s: list[str]
-        ref, ref_s, _, param, _ = self.model(seq, param=param, return_param=True, return_count=True, 
-                                    pseudoenergy=[self.nu*g for g in grads])
+        ref, ref_s, _, param, _ = self.model(seq, param=param, return_param=True, return_count=True,
+                                    pseudoenergy=pseudo_list)
 
         ref_counts = []
         for k in sorted(param[0].keys()):
@@ -177,3 +193,4 @@ class ShapeNLLLoss(nn.Module):
         #     loss += self.l2_weight * l2_reg
 
         return loss
+

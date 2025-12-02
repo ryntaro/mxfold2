@@ -356,11 +356,11 @@ class Train(Common):
         model_params = [p for p in model.parameters() if p.requires_grad]
         if model_params:
             optim_params.append({'params': model_params, 'lr': lr, 'weight_decay': l2_weight})
-        if shape_model is not None:
-            for sm in shape_model:
-                sm_params = [p for p in sm.parameters() if p.requires_grad]
-                if sm_params:
-                    optim_params.append({'params': sm_params, 'lr': lr*0.1, 'weight_decay': l2_weight})
+        # if shape_model is not None:
+        #     for sm in shape_model:
+        #         sm_params = [p for p in sm.parameters() if p.requires_grad]
+        #         if sm_params:
+        #             optim_params.append({'params': sm_params, 'lr': lr*0.1, 'weight_decay': l2_weight})
         if len(optim_params) == 0:
             raise RuntimeError("No trainable parameters found after freeze (all params frozen?)")
         
@@ -422,6 +422,18 @@ class Train(Common):
                             shape_intercept=args.shape_intercept, shape_slope=args.shape_slope,
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight,
                             sl_weight=args.score_loss_weight)
+
+        elif loss_func == 'shape_rank':
+            # 追加: shape_rank loss を読み込む
+            from .loss.shape_rank_loss import ShapeRankLoss
+            return ShapeRankLoss(
+                model=model,
+                perturb=args.shape_perturb,
+                nu=args.shape_nu,
+                l1_weight=args.l1_weight,
+                l2_weight=args.l2_weight,
+                sl_weight=args.score_loss_weight,
+            )
 
         if loss_func == 'shape_cls':
             from .loss.shape_cls_loss import ShapeCLSLoss
@@ -804,9 +816,9 @@ class Train(Common):
         gparser.add_argument('--score-loss-weight', type=float, default=0.,
                             help='the weight for score loss for {hinge,fy} loss (default: 0)')
         gparser.add_argument('--perturb', type=float, default=0.1,
-                            help='standard deviation of perturbation for fy loss (default: 0.1)')
+                            help='standard deviation of perturbation for fy loss (default: 0.1) パラメータに探索ノイズを付加する')
         gparser.add_argument('--nu', type=float, default=0.1,
-                            help='weight for distribution (default: 0.1)')
+                            help='weight for distribution (default: 0.1) loss=f1 でImplicitMLEの勾配係数')
         gparser.add_argument('--loss-pos-paired', type=float, default=0.5,
                             help='the penalty for positive base-pairs for loss augmentation (default: 0.5)')
         gparser.add_argument('--loss-neg-paired', type=float, default=0.005,
@@ -817,12 +829,12 @@ class Train(Common):
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
         # gparser.add_argument('--shape-model', choices=('Wu', 'Foo', 'MLP'), default='Wu',
         #                     help="shape model nll->Wu, Foo, MSE-> MLP (default: Wu)")
-        gparser.add_argument('--shape-loss-func', choices=('shape_nll', 'shape_fy', 'shape_cls'), default='shape_nll',
+        gparser.add_argument('--shape-loss-func', choices=('shape_nll', 'shape_fy', 'shape_cls', 'shape_rank'), default='shape_nll',
                             help="loss fuction for SHAPE training data (default: shape)")
         gparser.add_argument('--shape-perturb', type=float, default=0.1,
                             help='standard deviation of perturbation for shape loss (default: 0.1)')
         gparser.add_argument('--shape-nu', type=float, default=0.1,
-                            help='weight for distribution for shape loss (default: 0.1)')
+                            help='weight for distribution for shape loss (default: 0.1) ImplicitMLEの勾配係数')
         subparser.add_argument('--shape-intercept', type=float, default=-0.8,
                             help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
         subparser.add_argument('--shape-slope', type=float, default=2.6, 

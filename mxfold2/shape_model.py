@@ -37,5 +37,8 @@ def build_shape_model(args: Namespace) -> nn.Module:
         from .fold.shape_layers import Helix
         # デフォルト初期値の Helix を返す
         return Helix()
+    elif args.shape_model == 'Corr':
+        from .fold.shape_layers import Corr
+        return Corr()
     else:
         raise ValueError(f'not implemented: {args.shape_model}')

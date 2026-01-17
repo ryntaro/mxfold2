@@ -85,14 +85,18 @@ class ShapeNLLLoss(nn.Module):
             max_abs = torch.tensor(1.0, device=pred.device, dtype=torch.float32)
 
         # pseudoenergy = nu * g / max_abs
-        pseudo_list = [ (self.nu * g / max_abs) for g in grads ]
+        # pseudo_list = [ (self.nu * g / max_abs) for g in grads ]
 
-        # pseudo_list = [ (self.nu * g) for g in grads ]
+        # original
+        pseudo_list = [ (self.nu * g) for g in grads ]
 
         ref: torch.Tensor
         ref_s: list[str]
         ref, ref_s, _, param, _ = self.model(seq, param=param, return_param=True, return_count=True,
                                     pseudoenergy=pseudo_list)
+        # I-MLE論文ではここでもperturbをかけている
+        # ref, ref_s, _, param, _ = self.model(seq, param=param, return_param=True, return_count=True,
+        #                             perturb=self.perturb, pseudoenergy=pseudo_list)
 
         ref_counts = []
         for k in sorted(param[0].keys()):

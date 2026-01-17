@@ -21,7 +21,7 @@ def _mask_and_clip_targets(t: torch.Tensor, min_val: float = 0.01, max_val: floa
     if not torch.is_tensor(t):
         t = torch.tensor(t)
     t = t.clone()
-    valid = t > -1
+    valid = t > -10
     # clip entire tensor (clipped values will be ignored where valid is False)
     clipped = torch.clamp(t, min=min_val, max=max_val)
     return valid, clipped

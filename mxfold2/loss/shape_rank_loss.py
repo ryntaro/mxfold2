@@ -34,6 +34,7 @@ class ShapeRankLoss(nn.Module):
         l1_weight: float = 0.0,
         l2_weight: float = 0.0,
         sl_weight: float = 0.0,
+        margin: float = 0.0,
     ) -> None:
         super().__init__()
         self.model = model
@@ -43,6 +44,7 @@ class ShapeRankLoss(nn.Module):
         self.l1_weight = l1_weight
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
+        self.margin = margin
         if sl_weight > 0.0:
             from .. import param_turner2004
             from ..fold.rnafold import RNAFold
@@ -66,8 +68,10 @@ class ShapeRankLoss(nn.Module):
 
         # 対象外 (-1 以下) をマスクし，[min,max] に clip
         valid, t_all = _mask_and_clip_targets(shape_vec, min_val=0.01, max_val=1.0)
+
+        # valid な点が全く無い場合：loss=0だが paired 依存にして勾配経路だけ残す
         if not valid.any():
-            return torch.tensor(0.0, device=device)
+            return paired_vec.sum() * 0.0
 
         t_valid = t_all[valid].to(device)
         p_mask = paired_vec[valid].to(device)
@@ -76,13 +80,19 @@ class ShapeRankLoss(nn.Module):
         w_p = p_mask          # [M]
         w_u = 1.0 - p_mask    # [M]
 
-        # どちらも存在しない場合は loss=0
+        # paired or unpaired のどちらかしか無い場合も、順位ロスは定義できない
+        # → loss=0 だが p_mask 経由で 0 を返して勾配経路は維持
         if (w_p.sum() <= 0) or (w_u.sum() <= 0):
-            return torch.tensor(0.0, device=device)
+            return p_mask.sum() * 0.0
+
+        # 要素数が 1 以下でもペアが作れないので同様に 0
+        if t_valid.numel() <= 1:
+            return p_mask.sum() * 0.0
 
         # s_j - s_i の差分行列 (i: paired, j: unpaired を想定)
         # diff[i,j] = t_valid[j] - t_valid[i]
         diff = t_valid[None, :] - t_valid[:, None]   # [M,M]
+
         # 重み行列: i 側が paired, j 側が unpaired のときに効く
         w = w_p[:, None] * w_u[None, :]              # [M,M]
 
@@ -93,12 +103,15 @@ class ShapeRankLoss(nn.Module):
 
         # logistic 近似: phi(s) = log(1 + exp(-(s/tau)))
         #   s = t_j - t_i が大きいほど（unpaired が高いほど） loss は小さい
-        phi = F.softplus(-diff / self.tau)   # [M,M]
+        # phi = F.softplus(-diff / self.tau)   # [M,M]
+        phi = F.softplus(-(diff - self.margin) / self.tau)   # [M,M]
 
         weighted = w * phi
         denom = w.sum()
+
+        # 有効なペアが 1 つもない場合：loss=0（ただし勾配経路は残す）
         if denom <= 0:
-            return torch.tensor(0.0, device=device)
+            return p_mask.sum() * 0.0
 
         return weighted.sum() / (denom + 1e-8)
 
@@ -186,7 +199,9 @@ class ShapeRankLoss(nn.Module):
             max_abs = torch.tensor(1.0, device=pred.device, dtype=torch.float32)
 
         # pseudoenergy = nu * g / max_abs
-        pseudo_list = [(self.nu * g / max_abs) for g in grads]
+        # pseudo_list = [(self.nu * g / max_abs) for g in grads]
+
+        pseudo_list = [(self.nu * g) for g in grads]
 
         # --- 2nd fold: pseudoenergy を加えた参照構造 ---
         ref: torch.Tensor

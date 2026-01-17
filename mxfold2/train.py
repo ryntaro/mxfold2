@@ -433,6 +433,7 @@ class Train(Common):
                 l1_weight=args.l1_weight,
                 l2_weight=args.l2_weight,
                 sl_weight=args.score_loss_weight,
+                margin=args.shape_margin
             )
 
         if loss_func == 'shape_cls':
@@ -841,6 +842,9 @@ class Train(Common):
                             help='Specify a slope used with SHAPE restraints. Default is 2.6.')
         gparser.add_argument('--shape-loss-weight', type=float, default=1.,
                             help='weight for SHAPE loss function (default=1) shape/shapeなしの交互学習における重み RNA間の重み')
+        gparser.add_argument('--shape-margin', type=float, default=0.0,
+                            help='margin for SHAPE Rank Loss (default=0)')
+
         gparser.add_argument('--mt-alpha', type=float, default=1.0, help='multitask: weight for structure loss')
         gparser.add_argument('--mt-beta',  type=float, default=1.0, help='multitask: weight for SHAPE loss')
 

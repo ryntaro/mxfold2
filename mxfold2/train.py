@@ -71,7 +71,7 @@ class Train(Common):
                                         
                     # Use autocast for mixed precision if enabled
                     with autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
-                        if vals['type'][i]=='BPSEQ':
+                        if vals['type'][i] in ('BPSEQ', 'BPSEQ2'):
                             loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
                         elif vals['type'][i]=='SHAPE': 
                             loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
@@ -241,7 +241,7 @@ class Train(Common):
                 n_batch = len(seqs)
                 for i in range(n_batch):
                     with autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
-                        if vals['type'][i]=='BPSEQ':
+                        if vals['type'][i] in ('BPSEQ', 'BPSEQ2'):
                             loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
                         elif vals['type'][i]=='SHAPE': 
                             loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
@@ -520,8 +520,11 @@ class Train(Common):
         # タスクによるデータセット生成の分岐（マルチタスクを生やす）
         task = args.task
         if task == 'Folding':
-            # 構造のみ（BPSEQ系データセットだけを使う）
             train_dataset = BPseqDataset(args.input)
+            if args.input_2 is not None:
+                input2_dataset = BPseqDataset(args.input_2, type_name='BPSEQ2')
+                train_dataset = ConcatDataset([train_dataset, input2_dataset])
+
         elif task == 'Implicit_MLE':
             train_dataset = BPseqDataset(args.input)
             # SHAPE拘束つき構造予測（従来の ShapeDataset を追加）
@@ -679,8 +682,8 @@ class Train(Common):
             'SHAPE': self.build_shape_loss_function(args.shape_loss_func, model, args, shape_model=shape_model), 
             'SHAPE_regress': self.build_shape_regress_loss_function(model) 
         }
-       
-        loss_weight = { 'BPSEQ': 1.0, 'SHAPE': args.shape_loss_weight, 'MULTI': 1.0, 'MULTI_intra': (args.mt_alpha, args.mt_beta) }
+        
+        loss_weight = { 'BPSEQ': 1.0, 'BPSEQ2': args.second_loss_weight, 'SHAPE': args.shape_loss_weight, 'MULTI': 1.0, 'MULTI_intra': (args.mt_alpha, args.mt_beta) }
         scheduler = self.build_scheduler(args.scheduler, optimizer, args)
 
         # Initialize GradScaler for mixed precision training
@@ -757,6 +760,10 @@ class Train(Common):
         subparser.add_argument('--init-param', type=str, default='',
                             help='the file name of the initial parameters')
         subparser.add_argument('--shape', type=str, action='append', help='specify the file name that includes SHAPE reactivity')
+        subparser.add_argument('--input-2', type=str, default=None,
+                            help='Second training data of the list of BPSEQ-formatted files')
+        subparser.add_argument('--second-loss-weight', type=float, default=1.0,
+                            help='loss weight for the second BPSEQ dataset (default: 1.0)')
         subparser.add_argument('--freeze', type=str, action='append',
                                help='freeze components for fine-tuning(Not --resume, but --init-param). repeatable or comma-separated. supported keys: encoder,fc_paired')
         # subparser.add_argument('--shape-intercept', type=float, default=-0.8,

@@ -38,7 +38,7 @@ class FastaDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
 
 
 class BPseqDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
-    def __init__(self, bpseq_list: str, dataset_id: int = 0) -> None:
+    def __init__(self, bpseq_list: str, dataset_id: int = 0, type_name: str = 'BPSEQ') -> None:
 
         super(Dataset, self).__init__()
         self.data = []
@@ -46,7 +46,7 @@ class BPseqDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
         with open(bpseq_list) as f:
             for l in f:
                 l = l.rstrip('\n').split()
-                self.data.append(self.read(l[0], dataset_id))
+                self.data.append(self.read(l[0], dataset_id, type_name))
 
     def __len__(self) -> int:
         return len(self.data)
@@ -54,7 +54,7 @@ class BPseqDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
     def __getitem__(self, idx) -> tuple[str, str, dict[str, torch.Tensor]]:
         return self.data[idx]
 
-    def read(self, filename: str, dataset_id: int) -> tuple[str, str, dict[str, torch.Tensor]]:
+    def read(self, filename: str, dataset_id: int, type_name: str = 'BPSEQ') -> tuple[str, str, dict[str, torch.Tensor]]:
 
         with open(filename) as f:
             p: list[int] = [0]
@@ -72,7 +72,8 @@ class BPseqDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
                     p.append(pair)
         
         seq = ''.join(s)
-        return (filename, seq, {'type': 'BPSEQ', 'target': torch.tensor(p), 'dataset_id': int(dataset_id)})
+        return (filename, seq, {'type': type_name, 'target': torch.tensor(p), 'dataset_id': int(dataset_id)})
+
 
 class ShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
     def __init__(self, shape_list: str, dataset_id: int) -> None:
